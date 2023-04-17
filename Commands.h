@@ -91,22 +91,26 @@ class JobsList {
     class JobEntry {
         // TODO: Add your data members
        public:
+        int job_id;
         pid_t pid;
         Command* cmd;
-        char cmd_line[COMMAND_MAX_ARGS];
+        const char* cmd_line;
         time_t start_time;
         bool stopped;
         JobEntry() = delete;
-        JobEntry(Command* cmd, pid_t pid, const char* cmd_line, time_t start_time, bool stopped):
-            pid(pid), cmd(cmd), cmd_line(cmd_line), start_time(start_time), stopped(stopped) {}
+        JobEntry(Command* cmd, int job_id, pid_t pid, const char* cmd_line, time_t start_time, bool stopped):
+            job_id(job_id), cmd(cmd), cmd_line(cmd_line), start_time(start_time), stopped(stopped) {}
     };
     // TODO: Add your data members
    public:
+    static bool comparePid(JobEntry* job1, JobEntry* job2) {
+        return (job1->pid < job2->pid);
+    }
     list<JobEntry*> jobs_list;
-    pid_t max_pid;
+    pid_t max_job_id;
     JobsList();
     ~JobsList();
-    void addJob(Command* cmd, bool isStopped = false);
+    void addJob(Command* cmd, pid_t pid, bool isStopped = false);
     void printJobsList();
     void killAllJobs();
     void removeFinishedJobs();

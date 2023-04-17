@@ -3,7 +3,7 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
+#include <time.h>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -188,7 +188,7 @@ void ChangeDirCommand::execute() {
     } else if (chdir(args[1]) == 0) {  // chdir succeeded
         SmallShell::lastWd = string(buffer);
     } else {
-        cout << "changing to: " << args[1] << endl;
+        //cout << "changing to: " << args[1] << endl;
         perror("smash error: chdir failed");
     }
 }
@@ -197,6 +197,7 @@ void ChangeDirCommand::execute() {
 //======================== External Commands ========================
 //===================================================================
 
+/*
 ExternalCommand::ExternalCommand(const char* cmd_line): Command(cmd_line) {}
 
 void ExternalCommand::execute() {
@@ -223,21 +224,84 @@ void ExternalCommand::execute() {
     }
 }
 
+*/
+
 //==============================================================
 //======================== Jobs Classes ========================
 //==============================================================
 
-JobsList::JobsList(): jobs_list(), max_pid(0) {}
+JobsList::JobsList(): jobs_list(), max_job_id(0) {}
 
 JobsList::~JobsList() {
-    while(!this->jobs_list.empty) {
+    while(!this->jobs_list.empty()) {
         delete this->jobs_list.back();
         this->jobs_list.pop_back();
     }
 }
 
-void JobsList::addJob(Command* cmd, bool isStopped = false) {
-    
+void JobsList::addJob(Command* cmd, pid_t pid, bool isStopped) {
+    this->jobs_list.push_back(new JobEntry(cmd, this->max_job_id + 1, pid ,cmd->cmd_line, time(nullptr), isStopped));
+    this->max_job_id++;
+}
+
+void JobsList::printJobsList() {
+    for(list<JobEntry*>::iterator it = this->jobs_list.begin(); it != this->jobs_list.end(); ++it) {
+        cout << "[" << (*it)->job_id << "] " << (*it)->cmd_line << " : " << (*it)->pid << " " << difftime(time(nullptr), (*it)->start_time);
+        if((*it)->stopped) {
+            cout << "(stopped)";
+        }
+        cout << endl;
+    }
+}
+
+void JobsList::killAllJobs() {
+    this->jobs_list.sort(JobsList::comparePid);
+    cout << "smash: sending SIGKILL signal to " << this->jobs_list.size() << " jobs:" << endl;
+    for(list<JobEntry*>::iterator it = this->jobs_list.begin(); it != this->jobs_list.end(); ++it) {
+        cout << (*it)->pid << ": " << (*it)->cmd_line << endl;
+    }
+}
+
+void JobsList::removeFinishedJobs() {
+    for(list<JobEntry*>::iterator it = this->jobs_list.begin(); it != this->jobs_list.end(); ) {
+        if(kill((*it)->pid, 0) != 0) {
+            it = this->jobs_list.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+JobEntry* JobsList::getJobById(int jobId) {
+    for(list<JobEntry*>::iterator it = this->jobs_list.begin(); it != this->jobs_list.end(); ++it) {
+        if((*it)->job_id == jobId) {
+            return (*it);
+        }
+    }
+    return nullptr;
+}
+
+void JobsList::removeJobById(int jobId) {
+    JobsList::JobEntry* job = this->getJobById(jobId);
+    if(job != nullptr) {
+        this->jobs_list.remove(job);
+    }
+}
+
+JobEntry* JobsList::getLastJob(int* lastJobId) {
+    if(!this->jobs_list.empty()) {
+        return this->jobs_list.back();
+    }
+    return nullptr;
+}
+
+JobEntry* JobsList::getLastStoppedJob(int* jobId) {
+    for(list<JobEntry*>::iterator it = this->jobs_list.rbegin(); it != this->jobs_list.rend(); ++it) {
+        if((*it)->stopped) {
+            return (*it);
+        }
+    }
+    return nullptr;
 }
 
 SmallShell::SmallShell() {}
