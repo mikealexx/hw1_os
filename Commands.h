@@ -3,7 +3,7 @@
 
 #include <string>
 #include <vector>
-#include <list>
+#include <map>
 
 using namespace std;
 
@@ -91,29 +91,19 @@ class JobsList {
     class JobEntry {
         // TODO: Add your data members
        public:
-        int job_id;
-        pid_t pid;
         Command* cmd;
+        pid_t pid;
         const char* cmd_line;
         time_t start_time;
         bool stopped;
         JobEntry() = delete;
-        JobEntry(Command* cmd, int job_id, pid_t pid, const char* cmd_line, time_t start_time, bool stopped):
-            job_id(job_id), cmd(cmd), cmd_line(cmd_line), start_time(start_time), stopped(stopped) {}
-        bool operator<(const JobEntry& other) const {
-            return (this->pid < other.pid);
-        }
-        bool operator!=(const JobEntry& other) const {
-            return (this->pid != other.pid);
-        }
+        JobEntry(Command* cmd, pid_t pid, const char* cmd_line, time_t start_time, bool stopped):
+            cmd(cmd), pid(pid), cmd_line(cmd_line), start_time(start_time), stopped(stopped) {}
     };
     // TODO: Add your data members
    public:
-    static bool comparePid(JobEntry* job1, JobEntry* job2) {
-        return (job1->pid < job2->pid);
-    }
-    list<JobEntry*> jobs_list;
-    pid_t max_job_id;
+    map<int ,JobEntry*> jobs_map; //map job id to job entry
+    int max_job_id;
     JobsList();
     ~JobsList();
     void addJob(Command* cmd, pid_t pid, bool isStopped = false);
@@ -122,8 +112,8 @@ class JobsList {
     void removeFinishedJobs();
     JobEntry* getJobById(int jobId);
     void removeJobById(int jobId);
-    JobEntry* getLastJob(int* lastJobId);
-    JobEntry* getLastStoppedJob(int* jobId);
+    //JobEntry* getLastJob(int* lastJobId);
+    //JobEntry* getLastStoppedJob(int* jobId);
     // TODO: Add extra methods or modify exisitng ones as needed
 };
 
@@ -211,6 +201,7 @@ class SmallShell {
     static string prompt;  // current prompt
     static string lastWd;  // last working directory
     static JobsList* jobs_list;
+    static pid_t curr_pid;
     Command* CreateCommand(const char* cmd_line);
     SmallShell(SmallShell const&) = delete;      // disable copy ctor
     void operator=(SmallShell const&) = delete;  // disable = operator

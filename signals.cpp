@@ -13,10 +13,13 @@ void ctrlZHandler(int sig_num) {
 }
 
 void ctrlCHandler(int sig_num) {
+    pid_t pid = SmallShell::curr_pid;
     cout << "smash: got ctrl-C" << endl;
-    cout << "smash: process " << getpid() << " was killed" << endl;
-    if(kill(getpid(), 9) < 0) {
-        perror("smash error: kill failed");
+    if(pid != -1) {
+        cout << "smash: process " << pid << " was killed" << endl;
+        if(kill(pid, 9) < 0) {
+            perror("smash error: kill failed");
+        }
     }
 }
 

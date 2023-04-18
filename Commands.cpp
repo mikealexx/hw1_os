@@ -130,6 +130,7 @@ BuiltInCommand::BuiltInCommand(const char* cmd_line)
 string SmallShell::prompt = "smash";
 string SmallShell::lastWd = "";
 JobsList* SmallShell::jobs_list;
+pid_t SmallShell::curr_pid = -1;
 
 ChpromptCommand::ChpromptCommand(const char* cmd_line)
     : BuiltInCommand(cmd_line) {}
@@ -206,19 +207,24 @@ void ExternalCommand::execute() {
         char* non_const = const_cast<char*>(cmd_line);
         _removeBackgroundSign(non_const);
     }
-    char* exe_args[] = {const_cast<char*>(this->cmd_line), nullptr};
+    //char* exe_args[] = {const_cast<char*>(this->cmd_line), nullptr};
+    char* exe_args[] = {"sleep", "5", nullptr};
     pid_t pid = fork();
     if(pid < 0) { //fork failed
         perror("smash error: fork failed");
     }
     else if(pid == 0) { //child process
         setpgrp();
-        execvp(firstWord(args[0]).c_str(), exe_args);
+        cout << exe_args[0] << " " << exe_args[1] << endl;
+        //execvp(firstWord(args[0]).c_str(), exe_args);
+        execvp("sleep", exe_args);
     }
     else { //parent process
+        SmallShell::curr_pid = pid;
         if(wait(&stat) < 0) {
             perror("smash error: wait failed");
         }
+        SmallShell::curr_pid = -1;
     }
 }
 
@@ -226,80 +232,84 @@ void ExternalCommand::execute() {
 //======================== Jobs Classes ========================
 //==============================================================
 
-
-JobsList::JobsList(): jobs_list(), max_job_id(0) {}
+JobsList::JobsList(): jobs_map(), max_job_id(0) {}
 
 JobsList::~JobsList() {
-    while(!this->jobs_list.empty()) {
-        delete this->jobs_list.back();
-        this->jobs_list.pop_back();
+    for(auto const& entry : this->jobs_map) {
+        delete entry.second;
     }
 }
 
 void JobsList::addJob(Command* cmd, pid_t pid, bool isStopped) {
-    this->jobs_list.push_back(new JobEntry(cmd, this->max_job_id + 1, pid ,cmd->cmd_line, time(nullptr), isStopped));
+    this->jobs_map.insert(pair<int, JobEntry*>(this->max_job_id+1, new JobEntry(cmd, pid, cmd->cmd_line, time(nullptr), isStopped)));
     this->max_job_id++;
 }
 
 void JobsList::printJobsList() {
-    for(list<JobEntry*>::iterator it = this->jobs_list.begin(); it != this->jobs_list.end(); ++it) {
-        cout << "[" << (*it)->job_id << "] " << (*it)->cmd_line << " : " << (*it)->pid << " " << difftime(time(nullptr), (*it)->start_time);
-        if((*it)->stopped) {
-            cout << "(stopped)";
+    for(auto const& entry : this->jobs_map) {
+        cout << "[" << entry.first << "] " << entry.second->cmd_line << " : " << entry.second->pid << " " << difftime(time(nullptr), entry.second->start_time);
+        if(kill(entry.second->pid, 0) != 0) { //check if process is stopped
+            cout << " (stopped)";
         }
         cout << endl;
     }
 }
 
 void JobsList::killAllJobs() {
-    this->jobs_list.sort(JobsList::comparePid);
-    cout << "smash: sending SIGKILL signal to " << this->jobs_list.size() << " jobs:" << endl;
-    for(list<JobEntry*>::iterator it = this->jobs_list.begin(); it != this->jobs_list.end(); ++it) {
-        cout << (*it)->pid << ": " << (*it)->cmd_line << endl;
+    for(auto const& entry : this->jobs_map) {
+        if(kill(entry.second->pid, 9) < 0) {
+            perror("smash error: kill failed");
+        }
     }
 }
 
 void JobsList::removeFinishedJobs() {
-    for(list<JobEntry*>::iterator it = this->jobs_list.begin(); it != this->jobs_list.end(); ) {
-        if(kill((*it)->pid, 0) != 0) {
-            it = this->jobs_list.erase(it);
-        } else {
-            ++it;
+    for(auto const& entry : this->jobs_map) {
+        if(kill(entry.second->pid, 0) == -1) { //find if current process has finished running
+            if(errno == ESRCH) { //process doesn't exist as it has finished running
+                int curr_job_id = entry.first;
+                delete entry.second; //deallocation
+                this->jobs_map.erase(curr_job_id); //erase the finished job from the map
+                if(curr_job_id == this->max_job_id) { //we need to update the max job id
+                    this->max_job_id = 0;
+                    for(auto const& entry : this->jobs_map) {
+                        if(entry.first > this->max_job_id) { //updating the max job id
+                            this->max_job_id = entry.first;
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 JobsList::JobEntry* JobsList::getJobById(int jobId) {
-    for(list<JobEntry*>::iterator it = this->jobs_list.begin(); it != this->jobs_list.end(); ++it) {
-        if((*it)->job_id == jobId) {
-            return (*it);
-        }
+    if(this->jobs_map.find(jobId) != this->jobs_map.end()) {
+        return this->jobs_map.find(jobId)->second;
     }
-    return nullptr;
+    else {
+        return nullptr;
+    }
 }
 
 void JobsList::removeJobById(int jobId) {
-    JobsList::JobEntry* job = this->getJobById(jobId);
-    if(job != nullptr) {
-        this->jobs_list.remove(job);
-    }
-}
-
-JobsList::JobEntry* JobsList::getLastJob(int* lastJobId) {
-    if(!this->jobs_list.empty()) {
-        return this->jobs_list.back();
-    }
-    return nullptr;
-}
-
-JobsList::JobEntry* JobsList::getLastStoppedJob(int* jobId) {
-    for(list<JobEntry*>::iterator it = this->jobs_list.rbegin(); it != this->jobs_list.rend(); ++it) {
-        if((*it)->stopped) {
-            return (*it);
+    if(this->jobs_map.find(jobId) != this->jobs_map.end()) { //job exists in map
+        delete this->jobs_map.find(jobId)->second;
+        this->jobs_map.erase(jobId);
+        if(jobId == this->max_job_id) {
+            this->max_job_id = 0;
+            for(auto const& entry : this->jobs_map) { //updating max job id
+                if(entry.first > this->max_job_id) {
+                    this->max_job_id = entry.first;
+                }
+            }
         }
     }
-    return nullptr;
 }
+
+// JobList::JobEntry* JobList::getLastJob(int* lastJobId) {
+
+// }
 
 SmallShell::SmallShell() {}
 
@@ -334,7 +344,10 @@ Command* SmallShell::CreateCommand(const char* cmd_line) {
 
 void SmallShell::executeCommand(const char* cmd_line) {
     string command = firstWord(cmd_line);
-    if (command == "chprompt") {
+    if(command == "") {
+        return;
+    }
+    else if (command == "chprompt") {
         ChpromptCommand chprompt(cmd_line);
         chprompt.execute();
     } else if (command == "showpid") {
