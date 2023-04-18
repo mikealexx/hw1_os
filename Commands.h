@@ -100,6 +100,12 @@ class JobsList {
         JobEntry() = delete;
         JobEntry(Command* cmd, int job_id, pid_t pid, const char* cmd_line, time_t start_time, bool stopped):
             job_id(job_id), cmd(cmd), cmd_line(cmd_line), start_time(start_time), stopped(stopped) {}
+        bool operator<(const JobEntry& other) const {
+            return (this->pid < other.pid);
+        }
+        bool operator!=(const JobEntry& other) const {
+            return (this->pid != other.pid);
+        }
     };
     // TODO: Add your data members
    public:

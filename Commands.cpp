@@ -197,38 +197,35 @@ void ChangeDirCommand::execute() {
 //======================== External Commands ========================
 //===================================================================
 
-/*
 ExternalCommand::ExternalCommand(const char* cmd_line): Command(cmd_line) {}
 
 void ExternalCommand::execute() {
+    int stat;
     bool background = _isBackgroundComamnd(cmd_line);
     if(background) {
-        _removeBackgroundSign(cmd_line);
+        char* non_const = const_cast<char*>(cmd_line);
+        _removeBackgroundSign(non_const);
     }
-    string exe_args = _cmd_to_string(this->args);
-    const char* exe = "/bin/bash";
-    char** exe_args = {exe, "-c", exe_args, nullptr};
+    char* exe_args[] = {const_cast<char*>(this->cmd_line), nullptr};
     pid_t pid = fork();
-    if(pid == -1) { //fork failed
+    if(pid < 0) { //fork failed
         perror("smash error: fork failed");
     }
-    if(pid == 0) { //son
+    else if(pid == 0) { //child process
         setpgrp();
-        if(execv(exe, exe_args) == -1) {
-            perror("smash error: execv failed");
+        execvp(firstWord(args[0]).c_str(), exe_args);
+    }
+    else { //parent process
+        if(wait(&stat) < 0) {
+            perror("smash error: wait failed");
         }
     }
-    else { //father
-        SmallShell& smash = SmallShell::getInstance();
-        //TODO: FINISH
-    }
 }
-
-*/
 
 //==============================================================
 //======================== Jobs Classes ========================
 //==============================================================
+
 
 JobsList::JobsList(): jobs_list(), max_job_id(0) {}
 
@@ -272,7 +269,7 @@ void JobsList::removeFinishedJobs() {
     }
 }
 
-JobEntry* JobsList::getJobById(int jobId) {
+JobsList::JobEntry* JobsList::getJobById(int jobId) {
     for(list<JobEntry*>::iterator it = this->jobs_list.begin(); it != this->jobs_list.end(); ++it) {
         if((*it)->job_id == jobId) {
             return (*it);
@@ -288,14 +285,14 @@ void JobsList::removeJobById(int jobId) {
     }
 }
 
-JobEntry* JobsList::getLastJob(int* lastJobId) {
+JobsList::JobEntry* JobsList::getLastJob(int* lastJobId) {
     if(!this->jobs_list.empty()) {
         return this->jobs_list.back();
     }
     return nullptr;
 }
 
-JobEntry* JobsList::getLastStoppedJob(int* jobId) {
+JobsList::JobEntry* JobsList::getLastStoppedJob(int* jobId) {
     for(list<JobEntry*>::iterator it = this->jobs_list.rbegin(); it != this->jobs_list.rend(); ++it) {
         if((*it)->stopped) {
             return (*it);
@@ -349,5 +346,9 @@ void SmallShell::executeCommand(const char* cmd_line) {
     } else if (command == "cd") {
         ChangeDirCommand cd(cmd_line);
         cd.execute();
+    }
+    else {
+        ExternalCommand external(cmd_line);
+        external.execute();
     }
 }
