@@ -14,8 +14,6 @@ class Command {
     // TODO: Add your data members
    public:
     const char* cmd_line;
-    int args_num;
-    char** args;
     Command(const char* cmd_line);
     virtual ~Command();
     virtual void execute() = 0;
@@ -81,8 +79,8 @@ class JobsList;
 class QuitCommand : public BuiltInCommand {
     // TODO: Add your data members
    public:
-    QuitCommand(const char* cmd_line, JobsList* jobs);
-    virtual ~QuitCommand() {}
+    QuitCommand(const char* cmd_line);
+    virtual ~QuitCommand();
     void execute() override;
 };
 

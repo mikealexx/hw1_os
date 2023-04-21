@@ -47,11 +47,20 @@ int _parseCommandLine(const char* cmd_line, char** args) {
         args[i] = (char*)malloc(s.length() + 1);
         memset(args[i], 0, s.length() + 1);
         strcpy(args[i], s.c_str());
-        args[++i] = NULL;
+        ++i;
     }
+    args[i] = NULL;
     return i;
 
     FUNC_EXIT()
+}
+
+void _parse_delete(char** args, int num_args)
+{
+	for (int i = 0; i < num_args; i++) {
+		free(args[i]);
+	}
+	//free(args);
 }
 
 std::string _cmd_to_string(char** args) {
@@ -111,14 +120,9 @@ std::string firstWord(const char* sentence) {
 // TODO: Add your implementation for classes in Commands.h
 
 Command::Command(const char* cmd_line)
-    : cmd_line(cmd_line), args_num(0), args(nullptr) {
-    this->args = (char**)malloc(COMMAND_MAX_ARGS);
-    this->args_num = _parseCommandLine(this->cmd_line, this->args);
-}
+    : cmd_line(cmd_line) {}
 
-Command::~Command() {
-    free(this->args);
-};
+Command::~Command() {};
 
 BuiltInCommand::BuiltInCommand(const char* cmd_line)
     : Command(cmd_line) {}
@@ -129,18 +133,22 @@ BuiltInCommand::BuiltInCommand(const char* cmd_line)
 
 string SmallShell::prompt = "smash";
 string SmallShell::lastWd = "";
-JobsList* SmallShell::jobs_list;
+JobsList* SmallShell::jobs_list = new JobsList();
 pid_t SmallShell::curr_pid = -1;
 
 ChpromptCommand::ChpromptCommand(const char* cmd_line)
     : BuiltInCommand(cmd_line) {}
 
 void ChpromptCommand::execute() {
-    if (this->args_num > 1) {
+    char** args = (char**)malloc(COMMAND_MAX_ARGS * sizeof(char*));
+    int args_num = _parseCommandLine(this->cmd_line, args);
+    if (args_num > 1) {
         SmallShell::prompt = args[1];
     } else {
         SmallShell::prompt = "smash";
     }
+    _parse_delete(args, args_num);
+    free(args);
 }
 
 GetCurrDirCommand::GetCurrDirCommand(const char* cmd_line)
@@ -166,7 +174,9 @@ ChangeDirCommand::ChangeDirCommand(const char* cmd_line)
     : BuiltInCommand(cmd_line) {}
 
 void ChangeDirCommand::execute() {
-    if (this->args_num <= 1) {
+    char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
+    int args_num = _parseCommandLine(this->cmd_line, args);
+    if (args_num <= 1) {
         cerr << "smash error:> \"" << this->cmd_line << "\"" << endl;
         return;
     }
@@ -175,7 +185,7 @@ void ChangeDirCommand::execute() {
         perror("smash error: getcwd failed");
         return;
     }
-    if (this->args_num > 2) {
+    if (args_num > 2) {
         cerr << "smash error: cd: too many arguments" << endl;
     } else if (strcmp(args[1], "-") == 0) {  //'cd -' was called
         if (SmallShell::lastWd == "") {      // last working directory is empty
@@ -192,6 +202,25 @@ void ChangeDirCommand::execute() {
         //cout << "changing to: " << args[1] << endl;
         perror("smash error: chdir failed");
     }
+    _parse_delete(args, args_num);
+    free(args);
+}
+
+QuitCommand::QuitCommand(const char* cmd_line): BuiltInCommand(cmd_line) {}
+
+void QuitCommand::execute() {
+    char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
+    int args_num = _parseCommandLine(this->cmd_line, args);
+    if(args_num >= 2 && strcmp(args[1], "kill") == 0) {
+        SmallShell::jobs_list->killAllJobs();
+    }
+    _parse_delete(args, args_num);
+    free(args);
+    exit(0);
+}
+
+QuitCommand::~QuitCommand() {
+    //_parse_delete((char**)this->args, this->args_num);
 }
 
 //===================================================================
@@ -208,7 +237,7 @@ void ExternalCommand::execute() {
         _removeBackgroundSign(non_const);
     }
     //char* exe_args[] = {const_cast<char*>(this->cmd_line), nullptr};
-    char* exe_args[] = {"sleep", "5", nullptr};
+    char* exe_args[] = {nullptr};
     pid_t pid = fork();
     if(pid < 0) { //fork failed
         perror("smash error: fork failed");
@@ -256,6 +285,9 @@ void JobsList::printJobsList() {
 }
 
 void JobsList::killAllJobs() {
+    if(this->jobs_map.empty()) {
+        return;
+    }
     for(auto const& entry : this->jobs_map) {
         if(kill(entry.second->pid, 9) < 0) {
             perror("smash error: kill failed");
@@ -314,8 +346,8 @@ void JobsList::removeJobById(int jobId) {
 SmallShell::SmallShell() {}
 
 SmallShell::~SmallShell() {
-    // TODO: add your implementation
-}
+    delete SmallShell::jobs_list;
+} 
 
 /**
  * Creates and returns a pointer to Command class which matches the given
@@ -359,6 +391,10 @@ void SmallShell::executeCommand(const char* cmd_line) {
     } else if (command == "cd") {
         ChangeDirCommand cd(cmd_line);
         cd.execute();
+    }
+    else if(command == "quit") {
+        QuitCommand quit(cmd_line);
+        quit.execute();
     }
     else {
         ExternalCommand external(cmd_line);
