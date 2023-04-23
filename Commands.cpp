@@ -209,7 +209,8 @@ void ChangeDirCommand::execute() {
 JobsCommand::JobsCommand(const char* cmd_line): BuiltInCommand(cmd_line) {}
 
 void JobsCommand::execute() {
-    SmallShell::jobs_list->printJobsList();
+    SmallShell& smash = SmallShell::getInstance();
+    smash.jobs_list->printJobsList();
 }
 
 QuitCommand::QuitCommand(const char* cmd_line): BuiltInCommand(cmd_line) {}
@@ -244,7 +245,7 @@ void ForegroundCommand::execute() {
                 cerr << "smash error: fg: jobs list is empty" << endl;
                 return;
             }
-            const char* cmd = SmallShell::jobs_list->getJobById(SmallShell::jobs_list->max_job_id)->cmd_line;
+            const char* cmd = SmallShell::jobs_list->getJobById(SmallShell::jobs_list->max_job_id)->og_cmd_line;
             pid_t fg_pid = SmallShell::jobs_list->getJobById(SmallShell::jobs_list->max_job_id)->pid;
             //cout << "remove job " << endl;
             SmallShell::jobs_list->removeJobById(SmallShell::jobs_list->max_job_id);
@@ -263,7 +264,7 @@ void ForegroundCommand::execute() {
             if(SmallShell::jobs_list->getJobById(atoi(args[1])) == nullptr) { //job id does not exist
                 cerr << "smash error: fg: job-id " << args[1] << " does not exist" << endl;
             }
-            const char* cmd = SmallShell::jobs_list->getJobById(atoi(args[1]))->cmd_line;
+            const char* cmd = SmallShell::jobs_list->getJobById(atoi(args[1]))->og_cmd_line;
             pid_t fg_pid = SmallShell::jobs_list->getJobById(atoi(args[1]))->pid;
             SmallShell::jobs_list->removeJobById(atoi(args[1]));
             cout << cmd << " : " << fg_pid << endl;
@@ -290,97 +291,48 @@ void ForegroundCommand::execute() {
 //======================== External Commands ========================
 //===================================================================
 
-void append_null_terminator(char** arr, int size) {
-    int i = 0;
-    while (i < size && arr[i] != nullptr) {
-        i++;
-    }
-    if (i < size) {
-        arr[i] = nullptr;
-    }
+void append_nullptr(char** arr, size_t size) {
+    arr[size] = nullptr;
 }
 
 ExternalCommand::ExternalCommand(const char* cmd_line): Command(cmd_line) {}
 
 void ExternalCommand::execute() {
-    /*
-    char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
-    int args_num = _parseCommandLine(this->cmd_line, args);
-    char* og_cmd_line = (char*)malloc(strlen(cmd_line) + 1);
-    strcpy(og_cmd_line, cmd_line);
-    int stat;
+    SmallShell& smash = SmallShell::getInstance();
     bool background = _isBackgroundComamnd(cmd_line);
-    char* non_const = const_cast<char*>(cmd_line);
-    _removeBackgroundSign(non_const);
-    append_null_terminator(args, args_num);
-    //char* exe_args[] = {nullptr};
+    char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
+    char new_cmd_line[COMMAND_ARGS_MAX_LENGTH]; //cmd_line without '&'
+    strcpy(new_cmd_line, cmd_line);
+    char* og_cmd_line = strdup(cmd_line);
+    _removeBackgroundSign(new_cmd_line);
+    int args_num = _parseCommandLine(new_cmd_line, args);
+    append_nullptr(args, args_num);
+    int status;
     pid_t pid = fork();
-    if(pid < 0) { //fork failed
-        perror("smash error: fork failed");
+    if(pid < 0) {
+        perror("smash error: pid failed");
     }
-    else if(pid == 0) { //child process
+    if(pid == 0) { //child process
         setpgrp();
-        //cout << args[0] << " " << args[1] << endl;
-        //execvp(firstWord(args[0]).c_str(), exe_args);
-
-        cout << "executing command: ";
-        for (int i = 0; args[i] != nullptr; i++) {
-            cout << args[i] << " ";
+        if(execvp(args[0], args) < 0) {
+            perror("smash error: execvp failed");
         }
-        cout << endl;
-
-        execvp(args[0], (char *const *) &non_const);
     }
     else { //parent process
-        if(background) {
-            //cout << og_cmd_line << endl;
-            SmallShell::jobs_list->addJob(pid, og_cmd_line, false);
-        }
-        else {
-            SmallShell::curr_pid = pid;
-            if(waitpid(pid, &stat, WUNTRACED) < 0) {
+        if(!background) {
+            smash.curr_pid = pid;
+            if(wait(&status) < 0) {
                 perror("smash error: wait failed");
             }
-            SmallShell::curr_pid = -1;
+            smash.curr_pid = -1;
+        }
+        else {
+            JobsList::JobEntry* job = new JobsList::JobEntry(pid, og_cmd_line, time(nullptr), false);
+            smash.jobs_list->addJob(pid, job);
         }
     }
     _parse_delete(args, args_num);
     free(args);
-    */
-
-    char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
-    int args_num = _parseCommandLine(this->cmd_line, args);
-    bool background = _isBackgroundComamnd(cmd_line);
-    char new_cmd_line[COMMAND_ARGS_MAX_LENGTH];
-    strcpy(new_cmd_line, cmd_line);
-    char place[10] = "bash";
-	char flag[4] = "-c";
-	_removeBackgroundSign(new_cmd_line);
-    char* const argv[] = { place, flag, new_cmd_line, nullptr};
-    pid_t pid = fork();
-    if(pid < 0) { //fork failed
-        perror("smash error: fork failed");
-    }
-    if(pid == 0) { //child process
-        setpgrp();
-        if (execv("/bin/bash", argv) == -1)
-		{
-			perror("smash error: execv failed");
-			exit(0);
-		}
-        exit(0);
-    }
-    else { //parent process
-        if(!background) { //with wait
-            SmallShell::curr_pid = pid;
-            int status;
-			waitpid(pid, &status, WUNTRACED);
-            SmallShell::curr_pid = -1;
-        }
-        else { //no wait - add to jobs list
-
-        }
-    }
 }
 
 //==============================================================
@@ -395,16 +347,23 @@ JobsList::~JobsList() {
     }
 }
 
-void JobsList::addJob(pid_t pid, const char* cmd_line, bool isStopped) {
-    this->jobs_map.insert(pair<int, JobEntry*>(this->max_job_id+1, new JobEntry(pid, cmd_line, time(nullptr), isStopped)));
-    this->max_job_id++;
+void JobsList::addJob(pid_t pid, JobEntry* job, bool isStopped) {
+    SmallShell& smash = SmallShell::getInstance();
+    smash.jobs_list->jobs_map.insert(pair<int, JobEntry*>(smash.jobs_list->max_job_id+1, job));
+    smash.jobs_list->max_job_id++;
 }
 
 void JobsList::printJobsList() {
-    for(auto const& entry : this->jobs_map) {
-        cout << "[" << entry.first << "] " << entry.second->cmd_line << " : " << entry.second->pid << " " << difftime(time(nullptr), entry.second->start_time);
-        if(kill(entry.second->pid, 0) != 0) { //check if process is stopped
-            cout << " (stopped)";
+    SmallShell& smash = SmallShell::getInstance();
+    if(smash.jobs_list->jobs_map.empty()) {
+        return;
+    }
+    for(auto const& entry : smash.jobs_list->jobs_map) {
+        cout << "[" << entry.first << "] " << entry.second->og_cmd_line << " : " << entry.second->pid << " " << difftime(time(nullptr), entry.second->start_time);
+        if(kill(entry.second->pid, 0) == -1) { //find if current process has finished running
+            if(errno == ESRCH) {
+                cout << " (stopped)";
+            }
         }
         cout << endl;
     }
@@ -415,6 +374,7 @@ void JobsList::killAllJobs() {
         return;
     }
     for(auto const& entry : this->jobs_map) {
+        free(entry.second->og_cmd_line);
         if(kill(entry.second->pid, 9) < 0) {
             perror("smash error: kill failed");
         }
@@ -426,6 +386,7 @@ void JobsList::removeFinishedJobs() {
         if(kill(entry.second->pid, 0) == -1) { //find if current process has finished running
             if(errno == ESRCH) { //process doesn't exist as it has finished running
                 int curr_job_id = entry.first;
+                free(entry.second->og_cmd_line);
                 delete entry.second; //deallocation
                 this->jobs_map.erase(curr_job_id); //erase the finished job from the map
                 if(curr_job_id == this->max_job_id) { //we need to update the max job id
@@ -452,6 +413,7 @@ JobsList::JobEntry* JobsList::getJobById(int jobId) {
 
 void JobsList::removeJobById(int jobId) {
     if(this->jobs_map.find(jobId) != this->jobs_map.end()) { //job exists in map
+        free(this->jobs_map.find(jobId)->second->og_cmd_line);
         delete this->jobs_map.find(jobId)->second;
         this->jobs_map.erase(jobId);
         if(jobId == this->max_job_id) {

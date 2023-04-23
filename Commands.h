@@ -89,14 +89,13 @@ class JobsList {
     class JobEntry {
         // TODO: Add your data members
        public:
-        Command* cmd;
         pid_t pid;
-        const char* cmd_line;
+        char* og_cmd_line;
         time_t start_time;
         bool stopped;
         JobEntry() = delete;
-        JobEntry(pid_t pid, const char* cmd_line, time_t start_time, bool stopped):
-            pid(pid), cmd_line(cmd_line), start_time(start_time), stopped(stopped) {}
+        JobEntry(pid_t pid, char* cmd_line, time_t start_time, bool stopped):
+            pid(pid), og_cmd_line(cmd_line), start_time(start_time), stopped(stopped) {}
     };
     // TODO: Add your data members
    public:
@@ -104,7 +103,7 @@ class JobsList {
     int max_job_id;
     JobsList();
     ~JobsList();
-    void addJob(pid_t pid, const char* cmd_line, bool isStopped = false);
+    void addJob(pid_t pid, JobEntry* job, bool isStopped = false);
     void printJobsList();
     void killAllJobs();
     void removeFinishedJobs();
