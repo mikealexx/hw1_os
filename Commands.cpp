@@ -327,6 +327,7 @@ void ExternalCommand::execute() {
             smash.curr_pid = -1;
         }
         else {
+            smash.jobs_list->removeFinishedJobs();
             JobsList::JobEntry* job = new JobsList::JobEntry(pid, og_cmd_line, time(nullptr), false);
             smash.jobs_list->addJob(pid, job);
         }
@@ -355,15 +356,14 @@ void JobsList::addJob(pid_t pid, JobEntry* job, bool isStopped) {
 
 void JobsList::printJobsList() {
     SmallShell& smash = SmallShell::getInstance();
+    smash.jobs_list->removeFinishedJobs();
     if(smash.jobs_list->jobs_map.empty()) {
         return;
     }
     for(auto const& entry : smash.jobs_list->jobs_map) {
-        cout << "[" << entry.first << "] " << entry.second->og_cmd_line << " : " << entry.second->pid << " " << difftime(time(nullptr), entry.second->start_time);
-        if(kill(entry.second->pid, 0) == -1) { //find if current process has finished running
-            if(errno == ESRCH) {
-                cout << " (stopped)";
-            }
+        cout << "[" << entry.first << "] " << entry.second->og_cmd_line << " : " << entry.second->pid << " " << difftime(time(nullptr), entry.second->start_time) << " secs";
+        if(entry.second->stopped) {
+            cout << "(stopped)";
         }
         cout << endl;
     }
@@ -381,26 +381,62 @@ void JobsList::killAllJobs() {
     }
 }
 
+/*
 void JobsList::removeFinishedJobs() {
-    for(auto const& entry : this->jobs_map) {
-        if(kill(entry.second->pid, 0) == -1) { //find if current process has finished running
-            if(errno == ESRCH) { //process doesn't exist as it has finished running
-                int curr_job_id = entry.first;
-                free(entry.second->og_cmd_line);
-                delete entry.second; //deallocation
-                this->jobs_map.erase(curr_job_id); //erase the finished job from the map
-                if(curr_job_id == this->max_job_id) { //we need to update the max job id
-                    this->max_job_id = 0;
-                    for(auto const& entry : this->jobs_map) {
-                        if(entry.first > this->max_job_id) { //updating the max job id
-                            this->max_job_id = entry.first;
-                        }
-                    }
-                }
+    if(this->jobs_map.empty()) {
+        return;
+    }
+    for(auto it = this->jobs_map.begin(); it != this->jobs_map.end();) {
+        pid_t curr_pid = it->second->pid;
+        int status;
+        pid_t result = waitpid(curr_pid, &status, WNOHANG);
+        if(result == -1) { //finished process
+            if(WIFEXITED(status) || WIFSIGNALED(status)) {
+                free(it->second->og_cmd_line);
+                delete it->second;
+                it = this->jobs_map.erase(it);
             }
+        }
+        else {
+            ++it;
+        }
+    }
+    this->max_job_id = 0; //updating max job-id
+    for(auto const& entry : this->jobs_map) {
+        if(entry.first > this->max_job_id) {
+            this->max_job_id = entry.first;
         }
     }
 }
+*/
+
+void JobsList::removeFinishedJobs() {
+    if (this->jobs_map.empty()) {
+        return;
+    }
+    std::vector<int> finished_jobs;
+    for (const auto& entry : this->jobs_map) {
+        int status;
+        pid_t result = waitpid(entry.second->pid, &status, WNOHANG);
+        if (result == entry.second->pid) { // Process has finished
+            if (WIFEXITED(status) || WIFSIGNALED(status)) {
+                free(entry.second->og_cmd_line);
+                delete entry.second;
+                finished_jobs.push_back(entry.first);
+            }
+        }
+    }
+    for (const auto& job_id : finished_jobs) {
+        this->jobs_map.erase(job_id);
+    }
+    this->max_job_id = 0;
+    for (const auto& entry : this->jobs_map) {
+        if (entry.first > this->max_job_id) {
+            this->max_job_id = entry.first;
+        }
+    }
+}
+
 
 JobsList::JobEntry* JobsList::getJobById(int jobId) {
     if(this->jobs_map.find(jobId) != this->jobs_map.end()) {
