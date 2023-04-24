@@ -10,7 +10,6 @@ void ctrlZHandler(int sig_num) {
     SmallShell& smash = SmallShell::getInstance();
     cout << "smash: got ctrl-Z" << endl;
     if(smash.curr_pid != -1) {
-        smash.jobs_list->removeFinishedJobs();
         JobsList::JobEntry* job = new JobsList::JobEntry(smash.curr_pid, smash.curr_cmd_line, time(nullptr), true);
         smash.jobs_list->addJob(smash.curr_pid, job);
         if(kill(smash.curr_pid, SIGSTOP) < 0) {
@@ -19,6 +18,7 @@ void ctrlZHandler(int sig_num) {
         cout << "smash: process " << smash.curr_pid << " was stopped" << endl;
         smash.curr_pid = -1;
     }
+    smash.jobs_list->removeFinishedJobs();
 }
 
 void ctrlCHandler(int sig_num) {

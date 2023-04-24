@@ -112,7 +112,8 @@ class JobsList {
     bool empty();
     JobEntry* getJobByPid(pid_t pid);
     //JobEntry* getLastJob(int* lastJobId);
-    //JobEntry* getLastStoppedJob(int* jobId);
+    JobEntry* getLastStoppedJob();
+    int getJobIdByPid(pid_t pid);
     // TODO: Add extra methods or modify exisitng ones as needed
 };
 
@@ -146,7 +147,7 @@ class ForegroundCommand : public BuiltInCommand {
 class BackgroundCommand : public BuiltInCommand {
     // TODO: Add your data members
    public:
-    BackgroundCommand(const char* cmd_line, JobsList* jobs);
+    BackgroundCommand(const char* cmd_line);
     virtual ~BackgroundCommand() {}
     void execute() override;
 };
@@ -187,7 +188,7 @@ class SetcoreCommand : public BuiltInCommand {
 class KillCommand : public BuiltInCommand {
     // TODO: Add your data members
    public:
-    KillCommand(const char* cmd_line, JobsList* jobs);
+    KillCommand(const char* cmd_line);
     virtual ~KillCommand() {}
     void execute() override;
 };
