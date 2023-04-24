@@ -110,6 +110,7 @@ class JobsList {
     JobEntry* getJobById(int jobId);
     void removeJobById(int jobId);
     bool empty();
+    JobEntry* getJobByPid(pid_t pid);
     //JobEntry* getLastJob(int* lastJobId);
     //JobEntry* getLastStoppedJob(int* jobId);
     // TODO: Add extra methods or modify exisitng ones as needed
@@ -200,6 +201,7 @@ class SmallShell {
     static string lastWd;  // last working directory
     static JobsList* jobs_list;
     static pid_t curr_pid;
+    static char* curr_cmd_line;
     Command* CreateCommand(const char* cmd_line);
     SmallShell(SmallShell const&) = delete;      // disable copy ctor
     void operator=(SmallShell const&) = delete;  // disable = operator

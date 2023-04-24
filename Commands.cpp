@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "signals.h"
 
 using namespace std;
 
@@ -135,6 +136,7 @@ string SmallShell::prompt = "smash";
 string SmallShell::lastWd = "";
 JobsList* SmallShell::jobs_list = new JobsList();
 pid_t SmallShell::curr_pid = -1;
+char* SmallShell::curr_cmd_line = "";
 
 ChpromptCommand::ChpromptCommand(const char* cmd_line)
     : BuiltInCommand(cmd_line) {}
@@ -229,30 +231,32 @@ void QuitCommand::execute() {
 ForegroundCommand::ForegroundCommand(const char* cmd_line): BuiltInCommand(cmd_line) {}
 
 void ForegroundCommand::execute() {
+    /*
+    SmallShell& smash = SmallShell::getInstance();
     char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
     int args_num = _parseCommandLine(this->cmd_line, args);
     if(args_num > 2) {
         cerr << "smash error: fg: invalid arguments" << endl;
     }
-    pid_t pid = fork();
-    if(pid < 0) {
-        perror("smash error: fork failed");
-    }
+    //pid_t pid = fork();
+    //if(pid < 0) {
+    //    perror("smash error: fork failed");
+    //}
     if(pid == 0) { //child
         setpgrp();
         if(args_num == 1) { //"fg"
-            if(SmallShell::jobs_list->empty()) { //jobs list is empty
+            if(smash.jobs_list->empty()) { //jobs list is empty
                 cerr << "smash error: fg: jobs list is empty" << endl;
                 return;
             }
-            const char* cmd = SmallShell::jobs_list->getJobById(SmallShell::jobs_list->max_job_id)->og_cmd_line;
-            pid_t fg_pid = SmallShell::jobs_list->getJobById(SmallShell::jobs_list->max_job_id)->pid;
+            const char* cmd = smash.jobs_list->getJobById(smash.jobs_list->max_job_id)->og_cmd_line;
+            pid_t fg_pid = smash.jobs_list->getJobById(smash.jobs_list->max_job_id)->pid;
             //cout << "remove job " << endl;
-            SmallShell::jobs_list->removeJobById(SmallShell::jobs_list->max_job_id);
+            smash.jobs_list->removeJobById(smash.jobs_list->max_job_id);
             cout << cmd << " : " << fg_pid << endl;
-            SmallShell::curr_pid = fg_pid;
-            if(SmallShell::jobs_list->getJobById(SmallShell::jobs_list->max_job_id)->stopped) {
-                if(kill(SmallShell::jobs_list->getJobById(SmallShell::jobs_list->max_job_id)->pid, 18) < 0) {
+            smash.curr_pid = fg_pid;
+            if(smash.jobs_list->getJobById(smash.jobs_list->max_job_id)->stopped) {
+                if(kill(smash.jobs_list->getJobById(smash.jobs_list->max_job_id)->pid, 18) < 0) {
                     perror("smash error: kill failed");
                 }
             }
@@ -261,16 +265,16 @@ void ForegroundCommand::execute() {
             if(atoi(args[1]) == 0) {
                 cerr << "smash error: fg: invalid arguments" << endl;
             }
-            if(SmallShell::jobs_list->getJobById(atoi(args[1])) == nullptr) { //job id does not exist
+            if(smash.jobs_list->getJobById(atoi(args[1])) == nullptr) { //job id does not exist
                 cerr << "smash error: fg: job-id " << args[1] << " does not exist" << endl;
             }
-            const char* cmd = SmallShell::jobs_list->getJobById(atoi(args[1]))->og_cmd_line;
-            pid_t fg_pid = SmallShell::jobs_list->getJobById(atoi(args[1]))->pid;
-            SmallShell::jobs_list->removeJobById(atoi(args[1]));
+            const char* cmd = smash.jobs_list->getJobById(atoi(args[1]))->og_cmd_line;
+            pid_t fg_pid = smash.jobs_list->getJobById(atoi(args[1]))->pid;
+            smash.jobs_list->removeJobById(atoi(args[1]));
             cout << cmd << " : " << fg_pid << endl;
-            SmallShell::curr_pid = fg_pid;
-            if(SmallShell::jobs_list->getJobById(atoi(args[1]))->stopped) {
-                if(kill(SmallShell::jobs_list->getJobById(atoi(args[1]))->pid, 18) < 0) {
+            smash.curr_pid = fg_pid;
+            if(smash.jobs_list->getJobById(atoi(args[1]))->stopped) {
+                if(kill(smash.jobs_list->getJobById(atoi(args[1]))->pid, 18) < 0) {
                     perror("smash error: kill failed");
                 }
             }
@@ -283,6 +287,40 @@ void ForegroundCommand::execute() {
         }
         SmallShell::curr_pid = -1;
     }
+    _parse_delete(args, args_num);
+    free(args);
+    */
+    SmallShell& smash = SmallShell::getInstance();
+    char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
+    int args_num = _parseCommandLine(this->cmd_line, args);
+    if(args_num > 2) {
+        cerr << "smash error: fg: invalid arguments" << endl;
+    }
+    if(smash.jobs_list->empty()) { //jobs list is empty
+        cerr << "smash error: fg: jobs list is empty" << endl;
+        return;
+    }
+    int job_id;
+    if(args_num == 1) {
+        job_id = smash.jobs_list->max_job_id;
+    }
+    else if(atoi(args[1]) != 0){
+        job_id = atoi(args[1]);
+    }
+    //const char* cmd = ; //original cmd_line
+    char* og_cmd = strdup(smash.jobs_list->getJobById(job_id)->og_cmd_line);
+    pid_t fg_pid = smash.jobs_list->getJobById(job_id)->pid; //process pid
+    smash.jobs_list->removeJobById(job_id);
+    cout << og_cmd << " : " << fg_pid << endl;
+    smash.curr_pid = fg_pid;
+    if(kill(fg_pid, SIGCONT) < 0) {
+        perror("smash error: kill failed");
+    }
+    int status;
+    if(waitpid(fg_pid, &status, WUNTRACED) < 0) {
+        perror("smash error: waitpid failed");
+    }
+    free(og_cmd);
     _parse_delete(args, args_num);
     free(args);
 }
@@ -321,7 +359,9 @@ void ExternalCommand::execute() {
     else { //parent process
         if(!background) {
             smash.curr_pid = pid;
-            if(wait(&status) < 0) {
+            smash.curr_cmd_line = og_cmd_line;
+            //ctrlZHandler(23);
+            if(waitpid(pid, &status, WUNTRACED) < 0) {
                 perror("smash error: wait failed");
             }
             smash.curr_pid = -1;
@@ -363,52 +403,25 @@ void JobsList::printJobsList() {
     for(auto const& entry : smash.jobs_list->jobs_map) {
         cout << "[" << entry.first << "] " << entry.second->og_cmd_line << " : " << entry.second->pid << " " << difftime(time(nullptr), entry.second->start_time) << " secs";
         if(entry.second->stopped) {
-            cout << "(stopped)";
+            cout << " (stopped)";
         }
         cout << endl;
     }
 }
 
 void JobsList::killAllJobs() {
+    cout << "sending SIGKILL signal to " << this->jobs_map.size() << " jobs:" << endl;
     if(this->jobs_map.empty()) {
         return;
     }
     for(auto const& entry : this->jobs_map) {
+        cout << entry.second->pid << ": " << entry.second->og_cmd_line << endl;
         free(entry.second->og_cmd_line);
         if(kill(entry.second->pid, 9) < 0) {
             perror("smash error: kill failed");
         }
     }
 }
-
-/*
-void JobsList::removeFinishedJobs() {
-    if(this->jobs_map.empty()) {
-        return;
-    }
-    for(auto it = this->jobs_map.begin(); it != this->jobs_map.end();) {
-        pid_t curr_pid = it->second->pid;
-        int status;
-        pid_t result = waitpid(curr_pid, &status, WNOHANG);
-        if(result == -1) { //finished process
-            if(WIFEXITED(status) || WIFSIGNALED(status)) {
-                free(it->second->og_cmd_line);
-                delete it->second;
-                it = this->jobs_map.erase(it);
-            }
-        }
-        else {
-            ++it;
-        }
-    }
-    this->max_job_id = 0; //updating max job-id
-    for(auto const& entry : this->jobs_map) {
-        if(entry.first > this->max_job_id) {
-            this->max_job_id = entry.first;
-        }
-    }
-}
-*/
 
 void JobsList::removeFinishedJobs() {
     if (this->jobs_map.empty()) {
@@ -465,6 +478,18 @@ void JobsList::removeJobById(int jobId) {
 
 bool JobsList::empty() {
     return this->jobs_map.empty();
+}
+
+JobsList::JobEntry* JobsList::getJobByPid(pid_t pid) {
+    if(this->jobs_map.empty()) {
+        return nullptr;
+    }
+    for(const auto& entry : this->jobs_map) {
+        if(entry.second->pid == pid) {
+            return entry.second; 
+        }
+    }
+    return nullptr;
 }
 
 // JobList::JobEntry* JobList::getLastJob(int* lastJobId) {

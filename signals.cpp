@@ -7,9 +7,18 @@
 using namespace std;
 
 void ctrlZHandler(int sig_num) {
-    // TODO: Add your implementation
-    cout << getpid() << endl;
-
+    SmallShell& smash = SmallShell::getInstance();
+    cout << "smash: got ctrl-Z" << endl;
+    if(smash.curr_pid != -1) {
+        smash.jobs_list->removeFinishedJobs();
+        JobsList::JobEntry* job = new JobsList::JobEntry(smash.curr_pid, smash.curr_cmd_line, time(nullptr), true);
+        smash.jobs_list->addJob(smash.curr_pid, job);
+        if(kill(smash.curr_pid, SIGSTOP) < 0) {
+            perror("smash error: kill failed");
+        }
+        cout << "smash: process " << smash.curr_pid << " was stopped" << endl;
+        smash.curr_pid = -1;
+    }
 }
 
 void ctrlCHandler(int sig_num) {
