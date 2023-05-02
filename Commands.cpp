@@ -143,6 +143,12 @@ bool _isRedirection(const char* cmd_line) {
   return (op1 != nullptr || op2 != nullptr);
 }
 
+bool _isPipe(const char* cmd_line) {
+    const std::string command = cmd_line;
+    return command.find("|&") != std::string::npos || command.find("|") != std::string::npos;
+}
+
+
 void _splitRedirectionPipe(const char* cmd_line, char* before, char* after) {
     const char* redirection = strpbrk(cmd_line, ">|");
     if (redirection == nullptr) {
@@ -532,6 +538,170 @@ void RedirectionCommand::execute() {
     free(args);
 }
 
+PipeCommand::PipeCommand(const char* cmd_line): Command(cmd_line) {}
+
+void PipeCommand::execute() {
+    char** args = (char**)malloc(sizeof(char*)* COMMAND_MAX_ARGS);
+    char new_cmd_line[COMMAND_ARGS_MAX_LENGTH]; //cmd_line without '&'
+    int args_num = _parseCommandLine(new_cmd_line, args);
+    strcpy(new_cmd_line, cmd_line);
+    string cmd_str = new_cmd_line;
+    string first_cmd;
+    string second_cmd;
+    bool err;
+    unsigned int index = string(new_cmd_line).find_first_of("|");
+    first_cmd = string(new_cmd_line).substr(0, index);
+    if (string(new_cmd_line).find_first_of("&") != string::npos && string(new_cmd_line).find_first_of("&") == index + 1) { // "|&"
+		second_cmd = string(new_cmd_line).substr(index + 2);
+		err = true;
+	}
+	else // "|"
+	{
+		second_cmd = string(new_cmd_line).substr(index + 1);
+	}
+    first_cmd = _trim(first_cmd);
+    second_cmd = _trim(second_cmd);
+    int my_pipe[2]; //my_pipe[0] - read; my_pipe[1] - write
+    if(pipe(my_pipe) < 0) {
+        perror("smash error: pipe failed");
+    }
+    pid_t pid1 = fork();
+    if(pid1 < 0) {
+        perror("smash error: fork failed");
+    }
+    if(pid1 == 0) { //first child - writing
+        setpgrp();
+        if(!err) { //"|"
+            if(dup2(my_pipe[1], 1) < 0) {
+                perror("smash error: dup2 failed");
+            }
+        }
+        else { // "|&"
+            if(dup2(my_pipe[1], 2) < 0) {
+                perror("smash error: dup2 failed");
+            }
+        }
+        if(close(my_pipe[0] < 0)) {
+            perror("smash error: close failed");
+        }
+        string command = firstWord(first_cmd.c_str());
+        if (command == "chprompt") {
+            ChpromptCommand chprompt(first_cmd.c_str());
+            chprompt.execute();
+        } else if (command == "showpid") {
+            ShowPidCommand showpid(first_cmd.c_str());
+            showpid.execute();
+        } else if (command == "pwd") {
+            GetCurrDirCommand pwd(first_cmd.c_str());
+            pwd.execute();
+        } else if (command == "cd") {
+            ChangeDirCommand cd(first_cmd.c_str());
+            cd.execute();
+        }
+        else if(command == "quit") {
+            QuitCommand quit(first_cmd.c_str());
+            quit.execute();
+        }
+        else if(command == "jobs") {
+            JobsCommand jobs(first_cmd.c_str());
+            jobs.execute();
+        }
+        else if(command == "fg") {
+            ForegroundCommand fg(first_cmd.c_str());
+            fg.execute();
+        }
+        else if(command == "bg") {
+            BackgroundCommand bg(first_cmd.c_str());
+            bg.execute();
+        }
+        else if(command == "kill") {
+            KillCommand kill_cmd(first_cmd.c_str());
+            kill_cmd.execute();
+        }
+        else {
+            char place[10] = "bash";
+            char flag[4] = "-c";
+            char* const argv[] = { place, flag, (char*)first_cmd.c_str(), nullptr };
+            if (execv("/bin/bash", argv) < 0) {
+                perror("smash error: execv failed");
+            }
+        }
+    }
+    pid_t pid2 = fork();
+    if(pid2 < 0) {
+        perror("smash error: fork failed");
+    }
+    if(pid2 == 0) { //second child - reading
+        setpgrp();
+        if(dup2(my_pipe[0], 0) < 0) {
+            perror("smash error: dup2 failed");
+        }
+        if(close(my_pipe[0])) {
+            perror("smash error: close failed");
+        }
+        if(close(my_pipe[1])) {
+            perror("smash error: close failed");
+        }
+        string command = firstWord(second_cmd.c_str());
+        if (command == "chprompt") {
+            ChpromptCommand chprompt(second_cmd.c_str());
+            chprompt.execute();
+        } else if (command == "showpid") {
+            ShowPidCommand showpid(second_cmd.c_str());
+            showpid.execute();
+        } else if (command == "pwd") {
+            GetCurrDirCommand pwd(second_cmd.c_str());
+            pwd.execute();
+        } else if (command == "cd") {
+            ChangeDirCommand cd(second_cmd.c_str());
+            cd.execute();
+        }
+        else if(command == "quit") {
+            QuitCommand quit(second_cmd.c_str());
+            quit.execute();
+        }
+        else if(command == "jobs") {
+            JobsCommand jobs(second_cmd.c_str());
+            jobs.execute();
+        }
+        else if(command == "fg") {
+            ForegroundCommand fg(second_cmd.c_str());
+            fg.execute();
+        }
+        else if(command == "bg") {
+            BackgroundCommand bg(second_cmd.c_str());
+            bg.execute();
+        }
+        else if(command == "kill") {
+            KillCommand kill_cmd(second_cmd.c_str());
+            kill_cmd.execute();
+        }
+        else {
+            char place[10] = "bash";
+            char flag[4] = "-c";
+            char* const argv[] = { place, flag, (char*)second_cmd.c_str(), nullptr };
+            if (execv("/bin/bash", argv) < 0) {
+                perror("smash error: execv failed");
+            }
+        }
+    }
+    // parent
+    if(close(my_pipe[0]) < 0) {
+        perror("smash error: close failed");
+    }
+    if(close(my_pipe[1]) < 0) {
+        perror("smash error: close failed");
+    }
+    if(waitpid(pid1, nullptr, WUNTRACED) < 0) {
+        perror("smash error: waitpid failed");
+    }
+    if(waitpid(pid2, nullptr, WUNTRACED) < 0) {
+        perror("smash error: waitpid failed");
+    }
+    _parse_delete(args, args_num);
+    free(args);
+}
+
 //==============================================================
 //======================== Jobs Classes ========================
 //==============================================================
@@ -712,6 +882,10 @@ void SmallShell::executeCommand(const char* cmd_line) {
     if(_isRedirection(cmd_line)) {
         RedirectionCommand redirect(cmd_line);
         redirect.execute();
+    }
+    if(_isPipe(cmd_line)) {
+        PipeCommand pipe(cmd_line);
+        pipe.execute();
     }
     else if(command == "") {
         return;
