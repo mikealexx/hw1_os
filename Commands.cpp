@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include "signals.h"
+#include <fcntl.h>
 
 using namespace std;
 
@@ -131,6 +132,33 @@ bool containsWildcard(char* str) {
     }
     
     return false; // return false if neither '*' nor '?' is found
+}
+
+bool _isRedirection(const char* cmd_line) {
+  // Look for the ">" and ">>" operators in the command line string
+  const char* op1 = std::strstr(cmd_line, ">");
+  const char* op2 = std::strstr(cmd_line, ">>");
+
+  // If either operator was found, return true
+  return (op1 != nullptr || op2 != nullptr);
+}
+
+void _splitRedirectionPipe(const char* cmd_line, char* before, char* after) {
+    const char* redirection = strpbrk(cmd_line, ">|");
+    if (redirection == nullptr) {
+        return; // no redirection found
+    }
+
+    size_t index = redirection - cmd_line;
+    if (redirection[0] == '|' && redirection[1] == '&') {
+        strncpy(before, cmd_line, index + 2);
+        before[index + 2] = '\0';
+        strcpy(after, redirection + 2);
+    } else {
+        strncpy(before, cmd_line, index);
+        before[index] = '\0';
+        strcpy(after, redirection + 1);
+    }
 }
 
 
@@ -417,6 +445,93 @@ void ExternalCommand::execute() {
     free(args);
 }
 
+//=====================================================================
+//======================== Redirection & Pipes ========================
+//=====================================================================
+
+RedirectionCommand::RedirectionCommand(const char* cmd_line): Command(cmd_line) {}
+
+void RedirectionCommand::execute() {
+    char** args = (char**)malloc(sizeof(char*)* COMMAND_MAX_ARGS);
+    char new_cmd_line[COMMAND_ARGS_MAX_LENGTH]; //cmd_line without '&'
+    int args_num = _parseCommandLine(new_cmd_line, args);
+    strcpy(new_cmd_line, cmd_line);
+    string cmd_str = new_cmd_line;
+    string first_cmd;
+    string second_cmd;
+    int first_index = cmd_str.find_first_of(">");
+	int last_index = cmd_str.find_last_of(">");
+	first_cmd = cmd_str.substr(0, first_index);
+	second_cmd = cmd_str.substr(last_index + 1);
+	first_cmd = _trim(first_cmd);
+	second_cmd = _trim(second_cmd);
+    int fd;
+    int out = dup(1);
+    if(out < 1) {
+        perror("smash error: dup failed");
+    }
+    if(close(1) < 0) {
+        perror("smash error: close failed");
+    }
+    if(first_index == last_index) { // "cmd1 > cmd2" - write over
+        fd = open((char*)second_cmd.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0655);
+        if(fd < 0) {
+            perror("smash error: open failed");
+            dup2(out,1);
+        }
+
+    }
+    else { // "cmd1 >> cmd2" - append
+        fd = open((char*)second_cmd.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0655);
+        if(fd < 0) {
+            perror("smash error: open failed");
+            dup2(out,1);
+        }
+    }
+    string command = firstWord(first_cmd.c_str());
+    if (command == "chprompt") {
+        ChpromptCommand chprompt(first_cmd.c_str());
+        chprompt.execute();
+    } else if (command == "showpid") {
+        ShowPidCommand showpid(first_cmd.c_str());
+        showpid.execute();
+    } else if (command == "pwd") {
+        GetCurrDirCommand pwd(first_cmd.c_str());
+        pwd.execute();
+    } else if (command == "cd") {
+        ChangeDirCommand cd(first_cmd.c_str());
+        cd.execute();
+    }
+    else if(command == "quit") {
+        QuitCommand quit(first_cmd.c_str());
+        quit.execute();
+    }
+    else if(command == "jobs") {
+        JobsCommand jobs(first_cmd.c_str());
+        jobs.execute();
+    }
+    else if(command == "fg") {
+        ForegroundCommand fg(first_cmd.c_str());
+        fg.execute();
+    }
+    else if(command == "bg") {
+        BackgroundCommand bg(first_cmd.c_str());
+        bg.execute();
+    }
+    else if(command == "kill") {
+        KillCommand kill_cmd(first_cmd.c_str());
+        kill_cmd.execute();
+    }
+    else {
+        ExternalCommand external(first_cmd.c_str());
+        external.execute();
+    }
+    close(fd);
+    dup2(out,1);
+    _parse_delete(args, args_num);
+    free(args);
+}
+
 //==============================================================
 //======================== Jobs Classes ========================
 //==============================================================
@@ -594,7 +709,11 @@ Command* SmallShell::CreateCommand(const char* cmd_line) {
 
 void SmallShell::executeCommand(const char* cmd_line) {
     string command = firstWord(cmd_line);
-    if(command == "") {
+    if(_isRedirection(cmd_line)) {
+        RedirectionCommand redirect(cmd_line);
+        redirect.execute();
+    }
+    else if(command == "") {
         return;
     }
     else if (command == "chprompt") {

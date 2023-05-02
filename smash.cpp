@@ -1,6 +1,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <string.h>
 
 #include <iostream>
 
@@ -23,6 +24,9 @@ int main(int argc, char* argv[]) {
         std::string cmd_line;
         std::getline(std::cin, cmd_line);
         smash.executeCommand(cmd_line.c_str());
+        if(cmd_line == "z") {
+            ctrlZHandler(23);
+        }
     } 
     return 0;
 }
