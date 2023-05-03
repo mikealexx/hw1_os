@@ -269,6 +269,8 @@ void JobsCommand::execute() {
 QuitCommand::QuitCommand(const char* cmd_line): BuiltInCommand(cmd_line) {}
 
 void QuitCommand::execute() {
+    SmallShell& smash = SmallShell::getInstance();
+    smash.jobs_list->removeFinishedJobs();
     char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
     int args_num = _parseCommandLine(this->cmd_line, args);
     if(args_num >= 2 && strcmp(args[1], "kill") == 0) {
@@ -330,34 +332,56 @@ void BackgroundCommand::execute() {
     char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
     int args_num = _parseCommandLine(this->cmd_line, args);
     if(args_num > 2) {
-        cerr << "smash error: fg: invalid arguments" << endl;
+        cerr << "smash error: bg: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     int job_id;
     if(args_num == 1) {
         if(smash.jobs_list->getLastStoppedJob() == nullptr) {
-            cerr << "smash error: bg: there is not stopped jobs to resume" << endl;
-            exit(0);
+            cerr << "smash error: bg: there is no stopped jobs to resume" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
         job_id = smash.jobs_list->getJobIdByPid(smash.jobs_list->getLastStoppedJob()->pid);
         if(job_id == -1) {
-            cerr << "smash error: bg: there is not stopped jobs to resume" << endl;
+            cerr << "smash error: bg: there is no stopped jobs to resume" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
     }
     else if(atoi(args[1]) != 0){
         job_id = atoi(args[1]);
         if(smash.jobs_list->getJobById(job_id) == nullptr) {
             cerr << "smash error: bg: job-id " << job_id << " does not exist" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
         if(!smash.jobs_list->getJobById(job_id)->stopped) {
-            cerr << "smash error: bg: job-id " << job_id << " is already running in the background";
+            cerr << "smash error: bg: job-id " << job_id << " is already running in the background" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
     }
     else if(atoi(args[1]) <= 0){
-        cerr << "smash error: fg: invalid arguments" << endl;
+        cerr << "smash error: bg: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
     }
     smash.jobs_list->getJobById(job_id)->stopped = false;
+    char* og_cmd = strdup(smash.jobs_list->getJobById(job_id)->og_cmd_line);
+    pid_t fg_pid = smash.jobs_list->getJobById(job_id)->pid; //process pid
+    cout << og_cmd << " : " << fg_pid << endl;
     if(kill(smash.jobs_list->getJobById(job_id)->pid, SIGCONT) < 0) {
         perror("smash error: kill failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     _parse_delete(args, args_num);
     free(args);
@@ -367,19 +391,40 @@ KillCommand::KillCommand(const char* cmd_line): BuiltInCommand(cmd_line) {}
 
 void KillCommand::execute() {
     SmallShell& smash = SmallShell::getInstance();
+    smash.jobs_list->removeFinishedJobs();
     char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
     int args_num = _parseCommandLine(this->cmd_line, args);
     if(args_num != 3) {
         cerr << "smash error: kill: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
-    if(atoi(args[2]) <= 0 || atoi(args[1]) > 0) {
-        cerr << "smash error: kill: invalid arguments" << endl;
+    if(atoi(args[2]) <= 0 || atoi(args[1]) >= 0) {
+        if(atoi(args[1]) >= 0 || atoi(args[2]) == 0) {
+            cerr << "smash error: kill: invalid arguments" << endl;
+        }
+        else {
+            cerr << "smash error: kill: job-id " << atoi(args[2]) << " does not exist" << endl;
+        }
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     int job_id = atoi(args[2]);
-    cout << "signal number " << -(atoi(args[1])) << " was sent to pid " <<smash.jobs_list->getJobById(job_id)->pid << endl;
+    if(smash.jobs_list->getJobById(job_id) == nullptr) {
+        cerr << "smash error: kill: job-id " << job_id << " does not exist" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
     if(kill(smash.jobs_list->getJobById(job_id)->pid, -(atoi(args[1]))) < 0) {
         perror("smash error: kill failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
+    cout << "signal number " << -(atoi(args[1])) << " was sent to pid " <<smash.jobs_list->getJobById(job_id)->pid << endl;
     if(-(atoi(args[1])) == SIGSTOP) {
         smash.jobs_list->getJobById(job_id)->stopped = true;
     }
@@ -388,6 +433,7 @@ void KillCommand::execute() {
     }
     _parse_delete(args, args_num);
     free(args);
+    smash.jobs_list->removeFinishedJobs();
 }
 
 //===================================================================
@@ -423,11 +469,13 @@ void ExternalCommand::execute() {
             char* const argv[] = {(char* const)bash.c_str(), (char* const)flag.c_str(), new_cmd_line, nullptr};
             if(execv("/bin/bash", argv) < 0) {
                 perror("smash error: execv failed");
+                exit(0);
             }
         }
         else {
             if(execvp(args[0], args) < 0) {
                 perror("smash error: execvp failed");
+                exit(0);
             }
         }
     }
@@ -624,6 +672,7 @@ void PipeCommand::execute() {
             char* const argv[] = { place, flag, (char*)first_cmd.c_str(), nullptr };
             if (execv("/bin/bash", argv) < 0) {
                 perror("smash error: execv failed");
+                exit(0);
             }
         }
     }
@@ -682,6 +731,7 @@ void PipeCommand::execute() {
             char* const argv[] = { place, flag, (char*)second_cmd.c_str(), nullptr };
             if (execv("/bin/bash", argv) < 0) {
                 perror("smash error: execv failed");
+                exit(0);
             }
         }
     }
@@ -736,7 +786,7 @@ void JobsList::printJobsList() {
 }
 
 void JobsList::killAllJobs() {
-    cout << "sending SIGKILL signal to " << this->jobs_map.size() << " jobs:" << endl;
+    cout << "smash: sending SIGKILL signal to " << this->jobs_map.size() << " jobs:" << endl;
     if(this->jobs_map.empty()) {
         return;
     }
