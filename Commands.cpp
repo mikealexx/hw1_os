@@ -12,6 +12,7 @@
 #include <vector>
 #include "signals.h"
 #include <fcntl.h>
+#include <sys/stat.h>
 
 using namespace std;
 
@@ -387,6 +388,61 @@ void BackgroundCommand::execute() {
     free(args);
 }
 
+SetcoreCommand::SetcoreCommand(const char* cmd_line): BuiltInCommand(cmd_line) {}
+
+void SetcoreCommand::execute() {
+    SmallShell& smash = SmallShell::getInstance();
+    char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
+    int args_num = _parseCommandLine(this->cmd_line, args);
+    int job_id;
+    long num_cores = sysconf(_SC_NPROCESSORS_ONLN);
+    if(args_num != 3) {
+        cerr << "smash error: setcore: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
+    else if(atoi(args[1]) != 0) {
+        job_id = atoi(args[1]);
+        if(smash.jobs_list->getJobById(job_id) == nullptr) {
+            cerr << "smash error: setcore: job-id " << job_id << " does not exist" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
+        }
+        if(atoi(args[2]) == 0) {
+            cerr << "smash error: setcore: invalid arguments" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
+        }
+        if(atoi(args[2]) < 0 || atoi(args[2]) > num_cores) {
+            cerr << "smash error: setcore: invalid core number" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
+        }
+    }
+    else {
+        cerr << "smash error: setcore: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
+    pid_t fg_pid = smash.jobs_list->getJobById(job_id)->pid; //process pid
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(atoi(args[2]), &cpuset);
+    if(sched_setaffinity(fg_pid, sizeof(cpu_set_t), &cpuset) < 0) {
+        perror("smash error: sched_setaffinity failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
+    _parse_delete(args, args_num);
+    free(args);
+}
+
 KillCommand::KillCommand(const char* cmd_line): BuiltInCommand(cmd_line) {}
 
 void KillCommand::execute() {
@@ -434,6 +490,57 @@ void KillCommand::execute() {
     _parse_delete(args, args_num);
     free(args);
     smash.jobs_list->removeFinishedJobs();
+}
+
+GetFileTypeCommand::GetFileTypeCommand(const char* cmd_line): BuiltInCommand(cmd_line) {}
+
+void GetFileTypeCommand::execute() {
+    SmallShell& smash = SmallShell::getInstance();
+    smash.jobs_list->removeFinishedJobs();
+    char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
+    int args_num = _parseCommandLine(this->cmd_line, args);
+    if(args_num != 2) {
+        cerr << "smash error: gettype: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
+    string file = (string)args[1];
+    struct stat file_stat;
+    string type;
+    if(stat(file.c_str(), &file_stat) < 0) {
+        perror("smash error: stat failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
+    switch(file_stat.st_mode & S_IFMT) {
+        case S_IFREG:
+            type = "regular type";
+            break;
+        case S_IFDIR:
+            type = "directory";
+            break;
+        case S_IFCHR:
+            type = "character device";
+            break;
+        case S_IFBLK:
+            type = "block device";
+            break;
+        case S_IFIFO:
+            type = "FIFO";
+            break;
+        case S_IFLNK:
+            type = "symbolic link";
+            break;
+        case S_IFSOCK:
+            type = "socket";
+            break;
+    }
+    off_t size = file_stat.st_size;
+    cout << args[1] << "\'s type is " << type << " and takes up " << size << " bytes" << endl;
+    _parse_delete(args, args_num);
+    free(args);
 }
 
 //===================================================================
@@ -532,6 +639,7 @@ void RedirectionCommand::execute() {
         if(fd < 0) {
             perror("smash error: open failed");
             dup2(out,1);
+            return;
         }
 
     }
@@ -568,6 +676,10 @@ void RedirectionCommand::execute() {
         ForegroundCommand fg(first_cmd.c_str());
         fg.execute();
     }
+    else if(command == "setcore") {
+        SetcoreCommand setcore(cmd_line);
+        setcore.execute();
+    }
     else if(command == "bg") {
         BackgroundCommand bg(first_cmd.c_str());
         bg.execute();
@@ -575,6 +687,10 @@ void RedirectionCommand::execute() {
     else if(command == "kill") {
         KillCommand kill_cmd(first_cmd.c_str());
         kill_cmd.execute();
+    }
+    else if(command == "getfileinfo") {
+        GetFileTypeCommand getfileinfo(cmd_line);
+        getfileinfo.execute();
     }
     else {
         ExternalCommand external(first_cmd.c_str());
@@ -666,15 +782,23 @@ void PipeCommand::execute() {
             KillCommand kill_cmd(first_cmd.c_str());
             kill_cmd.execute();
         }
+        else if(command == "setcore") {
+            SetcoreCommand setcore(cmd_line);
+            setcore.execute();
+        }
+        else if(command == "getfileinfo") {
+            GetFileTypeCommand getfileinfo(cmd_line);
+            getfileinfo.execute();
+        }
         else {
             char place[10] = "bash";
             char flag[4] = "-c";
             char* const argv[] = { place, flag, (char*)first_cmd.c_str(), nullptr };
             if (execv("/bin/bash", argv) < 0) {
                 perror("smash error: execv failed");
-                exit(0);
             }
         }
+        exit(0);
     }
     pid_t pid2 = fork();
     if(pid2 < 0) {
@@ -725,15 +849,23 @@ void PipeCommand::execute() {
             KillCommand kill_cmd(second_cmd.c_str());
             kill_cmd.execute();
         }
+        else if(command == "setcore") {
+            SetcoreCommand setcore(cmd_line);
+            setcore.execute();
+        }
+        else if(command == "getfileinfo") {
+            GetFileTypeCommand getfileinfo(cmd_line);
+            getfileinfo.execute();
+        }
         else {
             char place[10] = "bash";
             char flag[4] = "-c";
             char* const argv[] = { place, flag, (char*)second_cmd.c_str(), nullptr };
             if (execv("/bin/bash", argv) < 0) {
                 perror("smash error: execv failed");
-                exit(0);
             }
         }
+        exit(0);
     }
     // parent
     if(close(my_pipe[0]) < 0) {
@@ -932,10 +1064,12 @@ void SmallShell::executeCommand(const char* cmd_line) {
     if(_isRedirection(cmd_line)) {
         RedirectionCommand redirect(cmd_line);
         redirect.execute();
+        return;
     }
     if(_isPipe(cmd_line)) {
         PipeCommand pipe(cmd_line);
         pipe.execute();
+        return;
     }
     else if(command == "") {
         return;
@@ -969,9 +1103,17 @@ void SmallShell::executeCommand(const char* cmd_line) {
         BackgroundCommand bg(cmd_line);
         bg.execute();
     }
+    else if(command == "setcore") {
+        SetcoreCommand setcore(cmd_line);
+        setcore.execute();
+    }
     else if(command == "kill") {
         KillCommand kill_cmd(cmd_line);
         kill_cmd.execute();
+    }
+    else if(command == "getfileinfo") {
+        GetFileTypeCommand getfileinfo(cmd_line);
+        getfileinfo.execute();
     }
     else {
         ExternalCommand external(cmd_line);

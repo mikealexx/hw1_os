@@ -25,9 +25,9 @@ int main(int argc, char* argv[]) {
     SmallShell& smash = SmallShell::getInstance();
     int i=1;
     while (true) {
-        if(i==40) {
-            int j = nop();
-        }
+        //if(i==40) {
+        //    int j = nop();
+        //}
         std::cout << SmallShell::prompt << "> ";
         std::string cmd_line;
         std::getline(std::cin, cmd_line);
