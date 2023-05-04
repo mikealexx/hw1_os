@@ -13,6 +13,7 @@
 #include "signals.h"
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <bitset>
 
 using namespace std;
 
@@ -543,6 +544,30 @@ void GetFileTypeCommand::execute() {
     free(args);
 }
 
+ChmodCommand::ChmodCommand(const char* cmd_line): BuiltInCommand(cmd_line) {}
+
+void ChmodCommand::execute() {
+    SmallShell& smash = SmallShell::getInstance();
+    smash.jobs_list->removeFinishedJobs();
+    char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
+    int args_num = _parseCommandLine(this->cmd_line, args);
+    if(args_num != 3) {
+        cerr << "smash error: chmod: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
+    mode_t mode = stoi(args[1], 0, 8);
+    if(chmod(args[2], mode) < 0) {
+        perror("smash error: chmod failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
+    _parse_delete(args, args_num);
+    free(args);
+}
+
 //===================================================================
 //======================== External Commands ========================
 //===================================================================
@@ -692,6 +717,10 @@ void RedirectionCommand::execute() {
         GetFileTypeCommand getfileinfo(cmd_line);
         getfileinfo.execute();
     }
+    else if(command == "chmod") {
+        ChmodCommand chmod(cmd_line);
+        chmod.execute();
+    }
     else {
         ExternalCommand external(first_cmd.c_str());
         external.execute();
@@ -790,6 +819,10 @@ void PipeCommand::execute() {
             GetFileTypeCommand getfileinfo(cmd_line);
             getfileinfo.execute();
         }
+        else if(command == "chmod") {
+            ChmodCommand chmod(cmd_line);
+            chmod.execute();
+        }
         else {
             char place[10] = "bash";
             char flag[4] = "-c";
@@ -856,6 +889,10 @@ void PipeCommand::execute() {
         else if(command == "getfileinfo") {
             GetFileTypeCommand getfileinfo(cmd_line);
             getfileinfo.execute();
+        }
+        else if(command == "chmod") {
+            ChmodCommand chmod(cmd_line);
+            chmod.execute();
         }
         else {
             char place[10] = "bash";
@@ -1114,6 +1151,10 @@ void SmallShell::executeCommand(const char* cmd_line) {
     else if(command == "getfileinfo") {
         GetFileTypeCommand getfileinfo(cmd_line);
         getfileinfo.execute();
+    }
+    else if(command == "chmod") {
+        ChmodCommand chmod(cmd_line);
+        chmod.execute();
     }
     else {
         ExternalCommand external(cmd_line);
