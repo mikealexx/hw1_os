@@ -287,42 +287,62 @@ ForegroundCommand::ForegroundCommand(const char* cmd_line): BuiltInCommand(cmd_l
 
 void ForegroundCommand::execute() {
     SmallShell& smash = SmallShell::getInstance();
+    smash.jobs_list->removeFinishedJobs();
     char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
     int args_num = _parseCommandLine(this->cmd_line, args);
     if(args_num > 2) {
         cerr << "smash error: fg: invalid arguments" << endl;
-    }
-    if(smash.jobs_list->empty()) { //jobs list is empty
-        cerr << "smash error: fg: jobs list is empty" << endl;
+        _parse_delete(args, args_num);
+        free(args);
         return;
     }
     int job_id;
     if(args_num == 1) {
         job_id = smash.jobs_list->max_job_id;
+        if(smash.jobs_list->empty()) { //jobs list is empty
+            cerr << "smash error: fg: jobs list is empty" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
+        }
     }
     else if(atoi(args[1]) != 0){
         job_id = atoi(args[1]);
         if(smash.jobs_list->getJobById(job_id) == nullptr) {
             cerr << "smash error: fg: job-id " << job_id << " does not exist" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
     }
     else if(atoi(args[1]) <= 0){
         cerr << "smash error: fg: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     //const char* cmd = ; //original cmd_line
     char* og_cmd = strdup(smash.jobs_list->getJobById(job_id)->og_cmd_line);
     pid_t fg_pid = smash.jobs_list->getJobById(job_id)->pid; //process pid
-    smash.jobs_list->removeJobById(job_id);
+    //smash.jobs_list->removeJobById(job_id);
+    //smash.jobs_list->getJobById(job_id)->fg = true;
     cout << og_cmd << " : " << fg_pid << endl;
     smash.curr_pid = fg_pid;
     smash.curr_cmd_line = og_cmd;
     if(kill(fg_pid, SIGCONT) < 0) {
         perror("smash error: kill failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     int status;
     if(waitpid(fg_pid, &status, WUNTRACED) < 0) {
         perror("smash error: waitpid failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
+    smash.curr_pid = -1;
     _parse_delete(args, args_num);
     free(args);
 }
@@ -475,7 +495,8 @@ void KillCommand::execute() {
         free(args);
         return;
     }
-    if(kill(smash.jobs_list->getJobById(job_id)->pid, -(atoi(args[1]))) < 0) {
+    int sig = -(atoi(args[1]));
+    if(kill(smash.jobs_list->getJobById(job_id)->pid, sig) < 0) {
         perror("smash error: kill failed");
         _parse_delete(args, args_num);
         free(args);
@@ -986,6 +1007,13 @@ void JobsList::removeFinishedJobs() {
                 delete entry.second;
                 finished_jobs.push_back(entry.first);
             }
+        }
+        else if(result == -1 && errno == ECHILD){
+            if(entry.second->og_cmd_line != nullptr) {
+                free(entry.second->og_cmd_line);
+            }
+            delete entry.second;
+            finished_jobs.push_back(entry.first);
         }
     }
     for (const auto& job_id : finished_jobs) {

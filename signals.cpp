@@ -10,8 +10,14 @@ void ctrlZHandler(int sig_num) {
     SmallShell& smash = SmallShell::getInstance();
     cout << "smash: got ctrl-Z" << endl;
     if(smash.curr_pid != -1) {
-        JobsList::JobEntry* job = new JobsList::JobEntry(smash.curr_pid, smash.curr_cmd_line, time(nullptr), true);
-        smash.jobs_list->addJob(smash.curr_pid, job);
+        if(smash.jobs_list->getJobByPid(smash.curr_pid) == nullptr) { //job is not already in jobs list
+            JobsList::JobEntry* job = new JobsList::JobEntry(smash.curr_pid, smash.curr_cmd_line, time(nullptr), true);
+            smash.jobs_list->addJob(smash.curr_pid, job);
+        }
+        else {
+            smash.jobs_list->getJobByPid(smash.curr_pid)->start_time = time(nullptr);
+            smash.jobs_list->getJobByPid(smash.curr_pid)->stopped = true;
+        }
         if(kill(smash.curr_pid, SIGSTOP) < 0) {
             perror("smash error: kill failed");
         }
@@ -22,14 +28,21 @@ void ctrlZHandler(int sig_num) {
 }
 
 void ctrlCHandler(int sig_num) {
+    SmallShell& smash = SmallShell::getInstance();
     pid_t pid = SmallShell::curr_pid;
     cout << "smash: got ctrl-C" << endl;
     if(pid != -1) {
         cout << "smash: process " << pid << " was killed" << endl;
-        if(kill(pid, 9) < 0) {
+        int result = kill(pid, SIGINT);
+        if(result < 0) {
             perror("smash error: kill failed");
         }
     }
+    JobsList::JobEntry* job = smash.jobs_list->getJobByPid(pid);
+    if(job != nullptr) {
+        smash.jobs_list->removeJobById(smash.jobs_list->getJobIdByPid(pid));
+    }
+    smash.jobs_list->removeFinishedJobs();
 }
 
 void alarmHandler(int sig_num) {

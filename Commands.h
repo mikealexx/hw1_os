@@ -93,6 +93,7 @@ class JobsList {
         char* og_cmd_line;
         time_t start_time;
         bool stopped;
+        //bool fg;
         JobEntry() = delete;
         JobEntry(pid_t pid, char* cmd_line, time_t start_time, bool stopped):
             pid(pid), og_cmd_line(cmd_line), start_time(start_time), stopped(stopped) {}
