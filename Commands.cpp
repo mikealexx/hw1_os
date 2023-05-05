@@ -59,6 +59,56 @@ int _parseCommandLine(const char* cmd_line, char** args) {
     FUNC_EXIT()
 }
 
+int _parseExternalCommandLine(const char* cmd_line, char** args) {
+    FUNC_ENTRY()
+
+    std::string cmd(cmd_line);
+    std::vector<std::string> tokens;
+    std::string current_token;
+
+    bool in_quote = false;
+    char quote_type;
+
+    for (size_t i = 0; i < cmd.length(); i++) {
+        char c = cmd[i];
+        if (c == '"' || c == '\'') {
+            if (!in_quote) {
+                in_quote = true;
+                quote_type = c;
+            } else if (c == quote_type) {
+                in_quote = false;
+            } else {
+                current_token += c;
+            }
+        } else if (c == ' ' && !in_quote) {
+            if (!current_token.empty()) {
+                tokens.push_back(current_token);
+                current_token.clear();
+            }
+        } else {
+            current_token += c;
+        }
+    }
+
+    if (!current_token.empty()) {
+        tokens.push_back(current_token);
+    }
+
+    int num_args = tokens.size();
+
+    for (int i = 0; i < num_args; i++) {
+        std::string& token = tokens[i];
+        args[i] = (char*)malloc(token.length() + 1);
+        strcpy(args[i], token.c_str());
+    }
+
+    args[num_args] = NULL;
+
+    FUNC_EXIT()
+    return num_args;
+}
+
+
 void _parse_delete(char** args, int num_args)
 {
 	for (int i = 0; i < num_args; i++) {
@@ -215,6 +265,7 @@ void GetCurrDirCommand::execute() {
         cout << buffer << endl;
     } else {
         perror("smash error: getcwd failed");
+        return;
     }
 }
 
@@ -233,29 +284,44 @@ void ChangeDirCommand::execute() {
     int args_num = _parseCommandLine(this->cmd_line, args);
     if (args_num <= 1) {
         cerr << "smash error:> \"" << this->cmd_line << "\"" << endl;
+        _parse_delete(args, args_num);
+        free(args);
         return;
     }
     char buffer[MAX_PATH];  // get current working directory
     if (getcwd(buffer, sizeof(buffer)) == nullptr) {
         perror("smash error: getcwd failed");
+        _parse_delete(args, args_num);
+        free(args);
         return;
     }
     if (args_num > 2) {
         cerr << "smash error: cd: too many arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     } else if (strcmp(args[1], "-") == 0) {  //'cd -' was called
         if (SmallShell::lastWd == "") {      // last working directory is empty
             cerr << "smash error: cd: OLDPWD not set" << endl;
+            _parse_delete(args, args_num);
+            free(args);
             return;
         } else if (chdir(SmallShell::lastWd.c_str()) == 0) {  // chdir succeeded
             SmallShell::lastWd = string(buffer);
         } else {  // chdir failed
             perror("smash error: chdir failed");
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
     } else if (chdir(args[1]) == 0) {  // chdir succeeded
         SmallShell::lastWd = string(buffer);
     } else {
         //cout << "changing to: " << args[1] << endl;
         perror("smash error: chdir failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     _parse_delete(args, args_num);
     free(args);
@@ -394,6 +460,7 @@ void BackgroundCommand::execute() {
         cerr << "smash error: bg: invalid arguments" << endl;
         _parse_delete(args, args_num);
         free(args);
+        return;
     }
     smash.jobs_list->getJobById(job_id)->stopped = false;
     char* og_cmd = strdup(smash.jobs_list->getJobById(job_id)->og_cmd_line);
@@ -480,9 +547,15 @@ void KillCommand::execute() {
     if(atoi(args[2]) <= 0 || atoi(args[1]) >= 0) {
         if(atoi(args[1]) >= 0 || atoi(args[2]) == 0) {
             cerr << "smash error: kill: invalid arguments" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
         else {
             cerr << "smash error: kill: job-id " << atoi(args[2]) << " does not exist" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
         _parse_delete(args, args_num);
         free(args);
@@ -607,12 +680,15 @@ void ExternalCommand::execute() {
     strcpy(new_cmd_line, cmd_line);
     char* og_cmd_line = strdup(cmd_line);
     _removeBackgroundSign(new_cmd_line);
-    int args_num = _parseCommandLine(new_cmd_line, args);
+    int args_num = _parseExternalCommandLine(new_cmd_line, args);
     append_nullptr(args, args_num);
     int status;
     pid_t pid = fork();
     if(pid < 0) {
         perror("smash error: pid failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     if(pid == 0) { //child process
         setpgrp();
@@ -622,13 +698,18 @@ void ExternalCommand::execute() {
             char* const argv[] = {(char* const)bash.c_str(), (char* const)flag.c_str(), new_cmd_line, nullptr};
             if(execv("/bin/bash", argv) < 0) {
                 perror("smash error: execv failed");
-                exit(0);
+                _parse_delete(args, args_num);
+                free(args);
+                return;
             }
         }
         else {
+
             if(execvp(args[0], args) < 0) {
                 perror("smash error: execvp failed");
-                exit(0);
+                _parse_delete(args, args_num);
+                free(args);
+                return;
             }
         }
     }
@@ -639,6 +720,9 @@ void ExternalCommand::execute() {
             //ctrlZHandler(23);
             if(waitpid(pid, &status, WUNTRACED) < 0) {
                 perror("smash error: wait failed");
+                _parse_delete(args, args_num);
+                free(args);
+                return;
             }
             smash.curr_pid = -1;
         }
@@ -676,15 +760,23 @@ void RedirectionCommand::execute() {
     int out = dup(1);
     if(out < 1) {
         perror("smash error: dup failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     if(close(1) < 0) {
         perror("smash error: close failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     if(first_index == last_index) { // "cmd1 > cmd2" - write over
         fd = open((char*)second_cmd.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0655);
         if(fd < 0) {
             perror("smash error: open failed");
             dup2(out,1);
+            _parse_delete(args, args_num);
+            free(args);
             return;
         }
 
@@ -694,6 +786,9 @@ void RedirectionCommand::execute() {
         if(fd < 0) {
             perror("smash error: open failed");
             dup2(out,1);
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
     }
     string command = firstWord(first_cmd.c_str());
@@ -778,25 +873,40 @@ void PipeCommand::execute() {
     int my_pipe[2]; //my_pipe[0] - read; my_pipe[1] - write
     if(pipe(my_pipe) < 0) {
         perror("smash error: pipe failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     pid_t pid1 = fork();
     if(pid1 < 0) {
         perror("smash error: fork failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     if(pid1 == 0) { //first child - writing
         setpgrp();
         if(!err) { //"|"
             if(dup2(my_pipe[1], 1) < 0) {
                 perror("smash error: dup2 failed");
+                _parse_delete(args, args_num);
+                free(args);
+                return;
             }
         }
         else { // "|&"
             if(dup2(my_pipe[1], 2) < 0) {
                 perror("smash error: dup2 failed");
+                _parse_delete(args, args_num);
+                free(args);
+                return;
             }
         }
         if(close(my_pipe[0] < 0)) {
             perror("smash error: close failed");
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
         string command = firstWord(first_cmd.c_str());
         if (command == "chprompt") {
@@ -850,6 +960,9 @@ void PipeCommand::execute() {
             char* const argv[] = { place, flag, (char*)first_cmd.c_str(), nullptr };
             if (execv("/bin/bash", argv) < 0) {
                 perror("smash error: execv failed");
+                _parse_delete(args, args_num);
+                free(args);
+                return;
             }
         }
         exit(0);
@@ -857,17 +970,29 @@ void PipeCommand::execute() {
     pid_t pid2 = fork();
     if(pid2 < 0) {
         perror("smash error: fork failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     if(pid2 == 0) { //second child - reading
         setpgrp();
         if(dup2(my_pipe[0], 0) < 0) {
             perror("smash error: dup2 failed");
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
         if(close(my_pipe[0])) {
             perror("smash error: close failed");
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
         if(close(my_pipe[1])) {
             perror("smash error: close failed");
+            _parse_delete(args, args_num);
+            free(args);
+            return;
         }
         string command = firstWord(second_cmd.c_str());
         if (command == "chprompt") {
@@ -921,6 +1046,9 @@ void PipeCommand::execute() {
             char* const argv[] = { place, flag, (char*)second_cmd.c_str(), nullptr };
             if (execv("/bin/bash", argv) < 0) {
                 perror("smash error: execv failed");
+                _parse_delete(args, args_num);
+                free(args);
+                return;
             }
         }
         exit(0);
@@ -928,15 +1056,27 @@ void PipeCommand::execute() {
     // parent
     if(close(my_pipe[0]) < 0) {
         perror("smash error: close failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     if(close(my_pipe[1]) < 0) {
         perror("smash error: close failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     if(waitpid(pid1, nullptr, WUNTRACED) < 0) {
         perror("smash error: waitpid failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     if(waitpid(pid2, nullptr, WUNTRACED) < 0) {
         perror("smash error: waitpid failed");
+        _parse_delete(args, args_num);
+        free(args);
+        return;
     }
     _parse_delete(args, args_num);
     free(args);
@@ -987,6 +1127,7 @@ void JobsList::killAllJobs() {
         }
         if(kill(entry.second->pid, 9) < 0) {
             perror("smash error: kill failed");
+            return;
         }
     }
 }
