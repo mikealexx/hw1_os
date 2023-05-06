@@ -408,6 +408,7 @@ void ForegroundCommand::execute() {
         free(args);
         return;
     }
+    free(og_cmd);
     smash.curr_pid = -1;
     _parse_delete(args, args_num);
     free(args);
@@ -469,9 +470,11 @@ void BackgroundCommand::execute() {
     if(kill(smash.jobs_list->getJobById(job_id)->pid, SIGCONT) < 0) {
         perror("smash error: kill failed");
         _parse_delete(args, args_num);
+        free(og_cmd);
         free(args);
         return;
     }
+    free(og_cmd);
     _parse_delete(args, args_num);
     free(args);
 }
@@ -686,6 +689,7 @@ void ExternalCommand::execute() {
     pid_t pid = fork();
     if(pid < 0) {
         perror("smash error: pid failed");
+        free(og_cmd_line);
         _parse_delete(args, args_num);
         free(args);
         return;
@@ -698,15 +702,16 @@ void ExternalCommand::execute() {
             char* const argv[] = {(char* const)bash.c_str(), (char* const)flag.c_str(), new_cmd_line, nullptr};
             if(execv("/bin/bash", argv) < 0) {
                 perror("smash error: execv failed");
+                free(og_cmd_line);
                 _parse_delete(args, args_num);
                 free(args);
                 return;
             }
         }
         else {
-
             if(execvp(args[0], args) < 0) {
                 perror("smash error: execvp failed");
+                free(og_cmd_line);
                 _parse_delete(args, args_num);
                 free(args);
                 return;
@@ -720,10 +725,13 @@ void ExternalCommand::execute() {
             //ctrlZHandler(23);
             if(waitpid(pid, &status, WUNTRACED) < 0) {
                 perror("smash error: wait failed");
+                free(og_cmd_line);
                 _parse_delete(args, args_num);
                 free(args);
                 return;
             }
+            smash.curr_cmd_line = "";
+            free(og_cmd_line);
             smash.curr_pid = -1;
         }
         else {
@@ -1090,6 +1098,7 @@ JobsList::JobsList(): jobs_map(), max_job_id(0) {}
 
 JobsList::~JobsList() {
     for(auto const& entry : this->jobs_map) {
+        free(entry.second->og_cmd_line);
         delete entry.second;
     }
 }
