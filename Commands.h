@@ -118,6 +118,30 @@ class JobsList {
     // TODO: Add extra methods or modify exisitng ones as needed
 };
 
+class AlarmList {
+    public:
+        class AlarmEntry {
+            public:
+                string cmd_line;
+                time_t timestamp;
+                int duration;
+                pid_t pid;
+
+                AlarmEntry(string cmd_line, time_t timestamp, int duration, pid_t pid):
+                    cmd_line(cmd_line), timestamp(timestamp), duration(duration), pid(pid) {}
+                ~AlarmEntry() = default;
+        };
+    
+        vector<AlarmEntry*> alarm_list;
+        AlarmList();
+        ~AlarmList();
+        void addAlarm(string cmd_line, time_t timestamp, int duration, pid_t pid);
+        void removeFinishedAlarms(time_t time);
+        int lowestTime(time_t time);
+        void removeAlarmByPid(pid_t pid);
+        AlarmEntry* getCurrAlarm(time_t time);
+};
+
 //===================================================================
 //======================== Built In Commands ========================
 //===================================================================
@@ -202,6 +226,7 @@ class SmallShell {
     static string prompt;  // current prompt
     static string lastWd;  // last working directory
     static JobsList* jobs_list;
+    static AlarmList* alarm_list;
     static pid_t curr_pid;
     static char* curr_cmd_line;
     Command* CreateCommand(const char* cmd_line);

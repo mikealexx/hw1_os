@@ -46,5 +46,26 @@ void ctrlCHandler(int sig_num) {
 }
 
 void alarmHandler(int sig_num) {
-    // TODO: Add your implementation
+    SmallShell& smash = SmallShell::getInstance();
+    smash.jobs_list->removeFinishedJobs();
+	std::cout << "smash: got an alarm" << std::endl;
+	if (smash.jobs_list != nullptr) {
+		smash.jobs_list->removeFinishedJobs();
+	}
+    time_t curr_time = time(nullptr);
+	smash.alarm_list->removeFinishedAlarms(curr_time);
+	AlarmList::AlarmEntry* alarm_to_print = smash.alarm_list->getCurrAlarm(curr_time);
+	if (alarm_to_print != nullptr && smash.jobs_list->getJobByPid(alarm_to_print->pid) != nullptr)
+	{
+		string to_print = alarm_to_print->cmd_line;      
+		std::cout << "smash: " << to_print << " timed out!" << std::endl;
+		if (kill(alarm_to_print->pid, SIGKILL) == -1) {
+			std::cerr << "smash error: kill failed"<< std::endl;
+            delete alarm_to_print;
+			return;
+		}
+	}
+	int time_to_alarm = smash.alarm_list->lowestTime(curr_time);
+	if (time_to_alarm)
+		alarm(time_to_alarm);
 }
