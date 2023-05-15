@@ -253,6 +253,7 @@ string SmallShell::lastWd = "";
 JobsList* SmallShell::jobs_list = new JobsList();
 AlarmList* SmallShell::alarm_list = new AlarmList();
 pid_t SmallShell::curr_pid = -1;
+bool SmallShell::fg = false;
 string empty = "";
 char* SmallShell::curr_cmd_line = const_cast<char*>(empty.c_str());
 
@@ -738,7 +739,7 @@ void TimeoutCommand::execute() {
 	new_cmd_line[i] = '\0';
 	char place[10] = "/bin/bash";
 	char flag[4] = "-c";
-    char* with_ampersand = strdup(new_cmd_line.c_str());
+    char* with_ampersand = strdup(cmd_line);
 	removeAmpersand(new_cmd_line);
 	char* const argv[] = {place, flag, (char* const)new_cmd_line.c_str(), nullptr};
 	pid_t pid = fork();
@@ -768,6 +769,7 @@ void TimeoutCommand::execute() {
         int time_to_alarm = smash.alarm_list->lowestTime(curr_time);
         alarm(time_to_alarm); //set alarm
         if(!background) {
+            smash.fg = true;
             smash.curr_pid = pid;
             int status;
             if(waitpid(pid, &status, WUNTRACED) < 0) {
@@ -779,6 +781,7 @@ void TimeoutCommand::execute() {
             smash.alarm_list->removeAlarmByPid(pid);
             free(with_ampersand);
             smash.curr_pid = -1;
+            smash.fg = false;
         }
         else { //background job
             JobsList::JobEntry* job = new JobsList::JobEntry(pid, with_ampersand, time(nullptr), false);
@@ -1430,7 +1433,7 @@ void AlarmList::removeAlarmByPid(pid_t pid) {
         }
         break;
     }
-    delete toDelete;
+    //delete toDelete;
 }
 
 AlarmList::AlarmEntry* AlarmList::getCurrAlarm(time_t time) {

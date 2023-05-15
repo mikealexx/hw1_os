@@ -229,6 +229,7 @@ class SmallShell {
     static AlarmList* alarm_list;
     static pid_t curr_pid;
     static char* curr_cmd_line;
+    static bool fg;
     Command* CreateCommand(const char* cmd_line);
     SmallShell(SmallShell const&) = delete;      // disable copy ctor
     void operator=(SmallShell const&) = delete;  // disable = operator
