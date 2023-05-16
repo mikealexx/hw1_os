@@ -234,6 +234,19 @@ std::string _parseTimeoutCommand(std::string cmd_line, int& duration) {
     return cmd_line.substr(command_index);
 }
 
+bool _isNumber(char* num) {
+    for (int i=0; num[i]; i++) {
+        if(num[i] == '-') {
+            continue;
+        }
+        if (!isdigit(num[i])) {
+            return false;
+            break;
+        }
+    } 
+    return true;
+}
+
 // TODO: Add your implementation for classes in Commands.h
 
 Command::Command(const char* cmd_line)
@@ -372,14 +385,8 @@ void ForegroundCommand::execute() {
     smash.jobs_list->removeFinishedJobs();
     char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
     int args_num = _parseCommandLine(cmd_line, args);
-    if(args_num > 2) {
-        cerr << "smash error: fg: invalid arguments" << endl;
-        _parse_delete(args, args_num);
-        free(args);
-        return;
-    }
     int job_id;
-    if(args_num == 1) {
+    if(args_num == 1) { //no job-id specified
         job_id = smash.jobs_list->max_job_id;
         if(smash.jobs_list->empty()) { //jobs list is empty
             cerr << "smash error: fg: jobs list is empty" << endl;
@@ -387,7 +394,7 @@ void ForegroundCommand::execute() {
             free(args);
             return;
         }
-    }
+    } 
     else if(atoi(args[1]) != 0){
         job_id = atoi(args[1]);
         if(smash.jobs_list->getJobById(job_id) == nullptr) {
@@ -398,6 +405,12 @@ void ForegroundCommand::execute() {
         }
     }
     else if(atoi(args[1]) <= 0){
+        cerr << "smash error: fg: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
+    if(args_num > 2) {
         cerr << "smash error: fg: invalid arguments" << endl;
         _parse_delete(args, args_num);
         free(args);
@@ -436,12 +449,6 @@ void BackgroundCommand::execute() {
     SmallShell& smash = SmallShell::getInstance();
     char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
     int args_num = _parseCommandLine(cmd_line, args);
-    if(args_num > 2) {
-        cerr << "smash error: bg: invalid arguments" << endl;
-        _parse_delete(args, args_num);
-        free(args);
-        return;
-    }
     int job_id;
     if(args_num == 1) {
         if(smash.jobs_list->getLastStoppedJob() == nullptr) {
@@ -479,6 +486,12 @@ void BackgroundCommand::execute() {
         free(args);
         return;
     }
+    if(args_num > 2) {
+        cerr << "smash error: bg: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
     smash.jobs_list->getJobById(job_id)->stopped = false;
     char* og_cmd = strdup(smash.jobs_list->getJobById(job_id)->og_cmd_line);
     pid_t fg_pid = smash.jobs_list->getJobById(job_id)->pid; //process pid
@@ -501,41 +514,54 @@ void SetcoreCommand::execute() {
     SmallShell& smash = SmallShell::getInstance();
     char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
     int args_num = _parseCommandLine(cmd_line, args);
-    int job_id;
     long num_cores = sysconf(_SC_NPROCESSORS_ONLN);
-    if(args_num != 3) {
+    /*
+        1) job-id not a number, core not a number - invalid arguments
+        2) job-id not a number, core is a number - invalid arguments
+        3) job-id is a number, core not a number - check if job-id valid, if not - invalid job-id,
+                                              else - invalid arguments
+        4) job-id is a number, core is a number - check if job-id is valid, if not - invalid job-id,
+                                                    else, check if core valid.
+    */
+    if(!_isNumber(args[1])) { // job-id not a number
         cerr << "smash error: setcore: invalid arguments" << endl;
         _parse_delete(args, args_num);
         free(args);
         return;
     }
-    else if(atoi(args[1]) != 0) {
-        job_id = atoi(args[1]);
-        if(smash.jobs_list->getJobById(job_id) == nullptr) {
-            cerr << "smash error: setcore: job-id " << job_id << " does not exist" << endl;
+    else if(!_isNumber(args[2])) { // job-id number, core not a number
+        if(smash.jobs_list->getJobById(atoi(args[1])) == nullptr) { // job-id invalid
+            cerr << "smash error: setcore: job-id " << atoi(args[1]) << " does not exist" << endl;
             _parse_delete(args, args_num);
             free(args);
             return;
         }
-        if(atoi(args[2]) == 0) {
-            cerr << "smash error: setcore: invalid arguments" << endl;
+        cerr << "smash error: setcore: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
+    else { // job-id number, core number
+        if(smash.jobs_list->getJobById(atoi(args[1])) == nullptr) { // invalid job-id
+            cerr << "smash error: setcore: job-id " << atoi(args[1]) << " does not exist" << endl;
             _parse_delete(args, args_num);
             free(args);
             return;
         }
-        if(atoi(args[2]) < 0 || atoi(args[2]) > num_cores) {
+        else if(atoi(args[2]) < 0 || atoi(args[2]) > num_cores) { // invalid core number
             cerr << "smash error: setcore: invalid core number" << endl;
             _parse_delete(args, args_num);
             free(args);
             return;
         }
     }
-    else {
+    if(args_num != 3) {
         cerr << "smash error: setcore: invalid arguments" << endl;
         _parse_delete(args, args_num);
         free(args);
         return;
     }
+    int job_id = atoi(args[1]);
     pid_t fg_pid = smash.jobs_list->getJobById(job_id)->pid; //process pid
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -557,36 +583,54 @@ void KillCommand::execute() {
     smash.jobs_list->removeFinishedJobs();
     char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
     int args_num = _parseCommandLine(cmd_line, args);
+    /*
+        1) job-id not a number, signal not a number - invalid arguments
+        2) job-id not a number, signal number - invalid arguments
+        3) job-id number, signal not a number - check if job-id valid, if not - invalid job-id,
+                                                else - invalid arguments
+        4) job-id number, signal number - check if job-id valid, if not - invalid job-id,
+                                                else - let kill fail
+    
+    */
+    if(!_isNumber(args[2])) { // job-id not a number
+        cerr << "smash error: kill: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
+    else if(!_isNumber(args[1])) { // job-id is a number, signal not a number
+        if(smash.jobs_list->getJobById(atoi(args[2])) == nullptr) { // job doesn't exist
+            cerr << "smash error: kill: job-id " << atoi(args[2]) << " does not exist" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
+        }
+        cerr << "smash error: kill: invalid arguments" << endl;
+        _parse_delete(args, args_num);
+        free(args);
+        return;
+    }
+    else { // job-id is a number, signal is a number
+        if(smash.jobs_list->getJobById(atoi(args[2])) == nullptr) { // job doesn't exist
+            cerr << "smash error: kill: job-id " << atoi(args[2]) << " does not exist" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
+        }
+        if(atoi(args[1]) >= 0) { // invalid signal number
+            cerr << "smash error: kill: invalid arguments" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
+        }
+    }
     if(args_num != 3) {
         cerr << "smash error: kill: invalid arguments" << endl;
         _parse_delete(args, args_num);
         free(args);
         return;
     }
-    if(atoi(args[2]) <= 0 || atoi(args[1]) >= 0) {
-        if(atoi(args[1]) >= 0 || atoi(args[2]) == 0) {
-            cerr << "smash error: kill: invalid arguments" << endl;
-            _parse_delete(args, args_num);
-            free(args);
-            return;
-        }
-        else {
-            cerr << "smash error: kill: job-id " << atoi(args[2]) << " does not exist" << endl;
-            _parse_delete(args, args_num);
-            free(args);
-            return;
-        }
-        _parse_delete(args, args_num);
-        free(args);
-        return;
-    }
     int job_id = atoi(args[2]);
-    if(smash.jobs_list->getJobById(job_id) == nullptr) {
-        cerr << "smash error: kill: job-id " << job_id << " does not exist" << endl;
-        _parse_delete(args, args_num);
-        free(args);
-        return;
-    }
     int sig = -(atoi(args[1]));
     if(kill(smash.jobs_list->getJobById(job_id)->pid, sig) < 0) {
         perror("smash error: kill failed");
@@ -934,10 +978,10 @@ void RedirectionCommand::execute() {
     if (command == "chprompt") {
         ChpromptCommand chprompt(first_cmd.c_str());
         chprompt.execute();
-    } else if (command == "showpid") {
+    } else if (command == "showpid" || command == "showpid&") {
         ShowPidCommand showpid(first_cmd.c_str());
         showpid.execute();
-    } else if (command == "pwd") {
+    } else if (command == "pwd" || command == "pwd&") {
         GetCurrDirCommand pwd(first_cmd.c_str());
         pwd.execute();
     } else if (command == "cd") {
@@ -948,7 +992,7 @@ void RedirectionCommand::execute() {
         QuitCommand quit(first_cmd.c_str());
         quit.execute();
     }
-    else if(command == "jobs") {
+    else if(command == "jobs" || command == "jobs&") {
         JobsCommand jobs(first_cmd.c_str());
         jobs.execute();
     }
@@ -1051,10 +1095,10 @@ void PipeCommand::execute() {
         if (command == "chprompt") {
             ChpromptCommand chprompt(first_cmd.c_str());
             chprompt.execute();
-        } else if (command == "showpid") {
+        } else if (command == "showpid" || command == "showpid&") {
             ShowPidCommand showpid(first_cmd.c_str());
             showpid.execute();
-        } else if (command == "pwd") {
+        } else if (command == "pwd" || command == "pwd&") {
             GetCurrDirCommand pwd(first_cmd.c_str());
             pwd.execute();
         } else if (command == "cd") {
@@ -1065,7 +1109,7 @@ void PipeCommand::execute() {
             QuitCommand quit(first_cmd.c_str());
             quit.execute();
         }
-        else if(command == "jobs") {
+        else if(command == "jobs" || command == "jobs&") {
             JobsCommand jobs(first_cmd.c_str());
             jobs.execute();
         }
@@ -1137,10 +1181,10 @@ void PipeCommand::execute() {
         if (command == "chprompt") {
             ChpromptCommand chprompt(second_cmd.c_str());
             chprompt.execute();
-        } else if (command == "showpid") {
+        } else if (command == "showpid" || command == "showpid&") {
             ShowPidCommand showpid(second_cmd.c_str());
             showpid.execute();
-        } else if (command == "pwd") {
+        } else if (command == "pwd" || command == "pwd&") {
             GetCurrDirCommand pwd(second_cmd.c_str());
             pwd.execute();
         } else if (command == "cd") {
@@ -1151,7 +1195,7 @@ void PipeCommand::execute() {
             QuitCommand quit(second_cmd.c_str());
             quit.execute();
         }
-        else if(command == "jobs") {
+        else if(command == "jobs" || command == "jobs&") {
             JobsCommand jobs(second_cmd.c_str());
             jobs.execute();
         }
@@ -1267,7 +1311,6 @@ void JobsList::killAllJobs() {
         }
         if(kill(entry.second->pid, 9) < 0) {
             perror("smash error: kill failed");
-            return;
         }
     }
 }
@@ -1425,10 +1468,10 @@ void AlarmList::removeAlarmByPid(pid_t pid) {
     if(this->alarm_list.empty()) {
         return;
     }
-    AlarmEntry* toDelete;
+    //AlarmEntry* toDelete;
     for(auto it = this->alarm_list.begin(); it != this->alarm_list.end(); ++it) {
         if((*it)->pid == pid) {
-            toDelete = (*it);
+            //toDelete = (*it);
             this->alarm_list.erase(it);
         }
         break;
@@ -1477,10 +1520,10 @@ void SmallShell::executeCommand(const char* cmd_line) {
     else if (command == "chprompt") {
         ChpromptCommand chprompt(cmd_line);
         chprompt.execute();
-    } else if (command == "showpid") {
+    } else if (command == "showpid" || command == "showpid&") {
         ShowPidCommand showpid(cmd_line);
         showpid.execute();
-    } else if (command == "pwd") {
+    } else if (command == "pwd" || command == "pwd&") {
         GetCurrDirCommand pwd(cmd_line);
         pwd.execute();
     } else if (command == "cd") {
@@ -1491,7 +1534,7 @@ void SmallShell::executeCommand(const char* cmd_line) {
         QuitCommand quit(cmd_line);
         quit.execute();
     }
-    else if(command == "jobs") {
+    else if(command == "jobs" || command == "jobs&") {
         JobsCommand jobs(cmd_line);
         jobs.execute();
     }
