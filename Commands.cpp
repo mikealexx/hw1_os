@@ -235,6 +235,9 @@ std::string _parseTimeoutCommand(std::string cmd_line, int& duration) {
 }
 
 bool _isNumber(char* num) {
+    if(num == nullptr) {
+        return false;
+    }
     for (int i=0; num[i]; i++) {
         if(num[i] == '-') {
             continue;
@@ -396,6 +399,12 @@ void ForegroundCommand::execute() {
         }
     } 
     else if(atoi(args[1]) != 0){
+        if(args_num > 2) {
+            cerr << "smash error: fg: invalid arguments" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
+        }
         job_id = atoi(args[1]);
         if(smash.jobs_list->getJobById(job_id) == nullptr) {
             cerr << "smash error: fg: job-id " << job_id << " does not exist" << endl;
@@ -466,6 +475,12 @@ void BackgroundCommand::execute() {
         }
     }
     else if(atoi(args[1]) != 0){
+        if(args_num > 2) {
+            cerr << "smash error: bg: invalid arguments" << endl;
+            _parse_delete(args, args_num);
+            free(args);
+            return;
+        }
         job_id = atoi(args[1]);
         if(smash.jobs_list->getJobById(job_id) == nullptr) {
             cerr << "smash error: bg: job-id " << job_id << " does not exist" << endl;
@@ -854,7 +869,7 @@ void ExternalCommand::execute() {
     strcpy(new_cmd_line, cmd_line);
     char* og_cmd_line = strdup(cmd_line);
     _removeBackgroundSign(new_cmd_line);
-    int args_num = _parseExternalCommandLine(new_cmd_line, args);
+    int args_num = _parseCommandLine(new_cmd_line, args);
     append_nullptr(args, args_num);
     int status;
     pid_t pid = fork();
@@ -902,7 +917,7 @@ void ExternalCommand::execute() {
             }
             string empty = "";
             smash.curr_cmd_line = (char*)empty.c_str();
-            free(og_cmd_line);
+            //free(og_cmd_line);
             smash.curr_pid = -1;
         }
         else {
@@ -1273,7 +1288,7 @@ JobsList::JobsList(): jobs_map(), max_job_id(0) {}
 
 JobsList::~JobsList() {
     for(auto const& entry : this->jobs_map) {
-        free(entry.second->og_cmd_line);
+        //free(entry.second->og_cmd_line);
         delete entry.second;
     }
 }
