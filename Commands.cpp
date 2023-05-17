@@ -370,7 +370,6 @@ QuitCommand::QuitCommand(const char* cmd_line): BuiltInCommand(cmd_line) {}
 void QuitCommand::execute() {
     SmallShell& smash = SmallShell::getInstance();
     smash.jobs_list->removeFinishedJobs();
-    smash.jobs_list->removeFinishedJobs();
     char** args = (char**)malloc(sizeof(char*) * COMMAND_MAX_ARGS);
     int args_num = _parseCommandLine(cmd_line, args);
     if(args_num >= 2 && strcmp(args[1], "kill") == 0) {
@@ -399,12 +398,6 @@ void ForegroundCommand::execute() {
         }
     } 
     else if(atoi(args[1]) != 0){
-        if(args_num > 2) {
-            cerr << "smash error: fg: invalid arguments" << endl;
-            _parse_delete(args, args_num);
-            free(args);
-            return;
-        }
         job_id = atoi(args[1]);
         if(smash.jobs_list->getJobById(job_id) == nullptr) {
             cerr << "smash error: fg: job-id " << job_id << " does not exist" << endl;
@@ -475,12 +468,6 @@ void BackgroundCommand::execute() {
         }
     }
     else if(atoi(args[1]) != 0){
-        if(args_num > 2) {
-            cerr << "smash error: bg: invalid arguments" << endl;
-            _parse_delete(args, args_num);
-            free(args);
-            return;
-        }
         job_id = atoi(args[1]);
         if(smash.jobs_list->getJobById(job_id) == nullptr) {
             cerr << "smash error: bg: job-id " << job_id << " does not exist" << endl;
@@ -1084,7 +1071,7 @@ void PipeCommand::execute() {
     }
     if(pid1 == 0) { //first child - writing
         setpgrp();
-        if(!err) { //"|"
+        if(!err) { // "|"
             if(dup2(my_pipe[1], 1) < 0) {
                 perror("smash error: dup2 failed");
                 _parse_delete(args, args_num);
@@ -1288,7 +1275,7 @@ JobsList::JobsList(): jobs_map(), max_job_id(0) {}
 
 JobsList::~JobsList() {
     for(auto const& entry : this->jobs_map) {
-        //free(entry.second->og_cmd_line);
+        free(entry.second->og_cmd_line);
         delete entry.second;
     }
 }
@@ -1314,6 +1301,16 @@ void JobsList::printJobsList() {
     }
 }
 
+void JobsList::deleteJobs() {
+    if(this->jobs_map.empty()) {
+        return;
+    }
+    for (auto it = this->jobs_map.begin(); it != this->jobs_map.end();) {
+        this->jobs_map.erase(it);
+    }
+    return;
+}
+
 void JobsList::killAllJobs() {
     cout << "smash: sending SIGKILL signal to " << this->jobs_map.size() << " jobs:" << endl;
     if(this->jobs_map.empty()) {
@@ -1327,6 +1324,11 @@ void JobsList::killAllJobs() {
         if(kill(entry.second->pid, 9) < 0) {
             perror("smash error: kill failed");
         }
+    }
+    auto it = this->jobs_map.begin();
+    while (it != this->jobs_map.end()) {
+        delete it->second;
+        it = this->jobs_map.erase(it);
     }
 }
 

@@ -106,6 +106,7 @@ class JobsList {
     ~JobsList();
     void addJob(pid_t pid, JobEntry* job, bool isStopped = false);
     void printJobsList();
+    void deleteJobs();
     void killAllJobs();
     void removeFinishedJobs();
     JobEntry* getJobById(int jobId);
